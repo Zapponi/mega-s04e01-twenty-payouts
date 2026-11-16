@@ -14,3 +14,4 @@ Not checked yet. The keep skill's scripts/keep-check.mjs fills this part. Never 
 ## Findings
 
 ## Receipts
+- Os git hooks do kit só existem nas branches criadas depois do kickoff; até o PR do kickoff entrar em main, um commit direto em main não é bloqueado · source: teste local (commit 'test' em main passou; desfeito) · how: ran
