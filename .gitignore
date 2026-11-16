@@ -1,0 +1,9 @@
+# secrets and local state: never in the public repo
+host-desk/vars.json
+*.secret
+.env*
+logs/
+journal/
+host-desk/roles/*/scripts/state/
+lab/out/
+node_modules/
