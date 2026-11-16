@@ -9,10 +9,10 @@ import { fileURLToPath } from 'node:url';
 // host-desk/roles/<role>/extensions/vars.mjs → host-desk/
 const DESK = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 
-/** name → value, from vars.json. Missing file or bad JSON → no vars. */
+/** name → value, from vars.json (or VARS_FILE, for tests). Missing file or bad JSON → no vars. */
 export function loadVars() {
   try {
-    const raw = JSON.parse(readFileSync(join(DESK, 'vars.json'), 'utf8'));
+    const raw = JSON.parse(readFileSync(process.env.VARS_FILE || join(DESK, 'vars.json'), 'utf8'));
     return Object.fromEntries(Object.entries(raw).filter(([k, v]) => /^[A-Z][A-Z0-9_]*$/.test(k) && typeof v === 'string'));
   } catch {
     return {};

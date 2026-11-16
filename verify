@@ -1,0 +1,123 @@
+#!/usr/bin/env node
+// verify: the proof (BRIEF.md "Proof"). Exit 0 only when every check of the chosen mode passes.
+//   ./verify            unit tests + must checks M1–M7
+//   ./verify --slice 1  unit tests + slice 1 checks (latest run in logs/)
+//   ./verify --all      must checks + keep checks K1–K2
+// It reads the request log, the run log, the saved manual and (later) the API state; never the agent's report on
+// itself. It reads vars.json only to search for leaked values, and never prints a value.
+import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = dirname(fileURLToPath(import.meta.url));
+const LOGS = join(ROOT, 'logs');
+const MANUAL_URL = 'https://hq.mega.dev/challenges/twenty-payouts/api';
+const args = process.argv.slice(2);
+const slice = args.includes('--slice') ? args[args.indexOf('--slice') + 1] : null;
+const all = args.includes('--all');
+
+const results = [];
+const check = (id, ok, detail) => results.push({ id, ok, detail });
+
+function unitTests() {
+  const dir = join(ROOT, 'host-desk/roles/payout-runner/test');
+  const files = readdirSync(dir).filter((f) => f.endsWith('.test.mjs')).map((f) => join(dir, f));
+  const r = spawnSync(process.execPath, ['--test', ...files], { encoding: 'utf8' });
+  const pass = /# pass (\d+)/.exec(r.stdout)?.[1] ?? '0';
+  const fail = /# fail (\d+)/.exec(r.stdout)?.[1] ?? '?';
+  check('unit', r.status === 0, `request layer tests: ${pass} pass, ${fail} fail (node --test ${relative(ROOT, dir)}/)`);
+}
+
+function secretValues() {
+  try {
+    const raw = JSON.parse(readFileSync(join(ROOT, 'host-desk/vars.json'), 'utf8'));
+    return Object.entries(raw).filter(([, v]) => typeof v === 'string' && v.length >= 4 && !v.startsWith('<'));
+  } catch {
+    return null;
+  }
+}
+
+function walk(dir, out = []) {
+  if (!existsSync(dir)) return out;
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) walk(p, out);
+    else if (e.isFile()) out.push(p);
+  }
+  return out;
+}
+
+// M5: no vars value in logs/, journal/, the repo tree (tracked + untracked, not ignored) or the run output.
+function m5() {
+  const vals = secretValues();
+  if (!vals || vals.length === 0) return check('M5', false, 'cannot read the secret values from host-desk/vars.json to search for them');
+  const git = spawnSync('git', ['ls-files', '-co', '--exclude-standard', '-z'], { cwd: ROOT, encoding: 'utf8' });
+  if (git.status !== 0) return check('M5', false, 'git ls-files failed; cannot list the repo tree');
+  const files = new Set([...git.stdout.split('\0').filter(Boolean).map((f) => join(ROOT, f)), ...walk(LOGS), ...walk(join(ROOT, 'journal'))]);
+  files.delete(join(ROOT, 'host-desk/vars.json'));
+  const hits = [];
+  for (const f of files) {
+    let text;
+    try {
+      text = readFileSync(f, 'utf8');
+    } catch {
+      continue;
+    }
+    for (const [name, v] of vals) if (text.includes(v) || text.includes(encodeURIComponent(v))) hits.push(`${relative(ROOT, f)} holds {{${name}}}`);
+  }
+  check('M5', hits.length === 0, hits.length ? hits.join('; ') : `no secret value in ${files.size} files (repo tree, logs/, journal/)`);
+}
+
+function readLog() {
+  const f = join(LOGS, 'requests.jsonl');
+  if (!existsSync(f)) return [];
+  return readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+}
+
+const sameUrl = (a, b) => {
+  try {
+    const x = new URL(a);
+    const y = new URL(b);
+    return x.origin === y.origin && x.pathname.replace(/\/+$/, '') === y.pathname.replace(/\/+$/, '') && x.search === y.search;
+  } catch {
+    return false;
+  }
+};
+
+function slice1() {
+  const runs = existsSync(LOGS) ? readdirSync(LOGS).filter((f) => /^run-.+\.log$/.test(f)).sort() : [];
+  if (runs.length === 0) return check('slice1', false, 'no run log in logs/: run the agent with READ_ONLY=1 first');
+  const runFile = runs.at(-1);
+  const runId = runFile.slice(4, -4);
+  const started = statSync(join(LOGS, runFile)).birthtimeMs || statSync(join(LOGS, runFile)).ctimeMs;
+  const recs = readLog().filter((r) => r.run === runId);
+  const sent = recs.filter((r) => !r.refused);
+  const refused = recs.filter((r) => r.refused);
+  check('S1.get200', sent.some((r) => r.method === 'GET' && r.status === 200 && sameUrl(r.url, MANUAL_URL)), `run ${runId}: ${sent.length} sent, statuses ${sent.map((r) => r.status ?? r.error).join(', ') || 'none'}`);
+  const writes = sent.filter((r) => r.method !== 'GET');
+  check('S1.onlyGET', writes.length === 0, writes.length ? `${writes.length} non-GET sent: ${writes.map((r) => r.method).join(', ')}` : 'no method other than GET was sent');
+  const others = sent.filter((r) => !sameUrl(r.url, MANUAL_URL));
+  check('S1.onlyManual', others.length === 0, others.length ? `other URLs sent: ${others.map((r) => r.url).join(', ')}` : 'only the manual URL was requested');
+  const mdir = join(LOGS, 'manual');
+  const saved = existsSync(mdir) ? readdirSync(mdir).map((f) => join(mdir, f)).filter((f) => statSync(f).mtimeMs >= started - 1000 && statSync(f).size > 100) : [];
+  check('S1.manualSaved', saved.length > 0, saved.length ? `manual saved: ${saved.map((f) => relative(ROOT, f)).join(', ')}` : 'no manual saved under logs/manual/ for this run');
+  const out = readFileSync(join(LOGS, runFile), 'utf8');
+  check('S1.summary', /Endpoints/i.test(out) && /Time limit/i.test(out), 'run output holds the summary headings (Endpoints, Time limit)');
+  if (refused.length) console.log(`note: ${refused.length} request(s) refused by the request layer in this run: ${refused.map((r) => `${r.method} ${r.url} (${r.refused})`).join('; ')}`);
+}
+
+unitTests();
+if (slice === '1') {
+  slice1();
+  m5();
+} else {
+  for (const id of ['M1', 'M2', 'M3', 'M4', 'M6', 'M7']) check(id, false, 'not built yet (plan.md § 3, § 4)');
+  m5();
+  if (all) for (const id of ['K1', 'K2']) check(id, false, 'not built yet');
+}
+
+for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'} ${r.id}: ${r.detail}`);
+const failed = results.filter((r) => !r.ok).length;
+console.log(failed ? `\n${failed} check(s) failed.` : '\nAll checks passed.');
+process.exit(failed ? 1 : 0);

@@ -7,6 +7,7 @@ import * as nodePath from 'node:path';
 import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadVars } from './vars.mjs';
+import { mask } from '../lib/net.mjs';
 
 const SCRIPTS = join(dirname(dirname(fileURLToPath(import.meta.url))), 'scripts');
 const TIMEOUT_MS = 120_000;
@@ -17,6 +18,9 @@ const MAX_OUT = 20_000;
 // works behind a company proxy; of git's own settings only the commit name and email stay.
 const BASICS = /^(PATH|PATHEXT|SYSTEMROOT|SYSTEMDRIVE|WINDIR|COMSPEC|TEMP|TMP|TMPDIR|HOME|HOMEDRIVE|HOMEPATH|USERPROFILE|APPDATA|LOCALAPPDATA|PROGRAMDATA|USER|USERNAME|LOGNAME|SHELL|TERM|LANG|LC_[A-Z]+|TZ|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE|SSL_CERT_DIR|HTTPS?_PROXY|NO_PROXY|NODE_USE_ENV_PROXY|GIT_(AUTHOR|COMMITTER)_(NAME|EMAIL))$/i;
 const basics = () => Object.fromEntries(Object.entries(process.env).filter(([k]) => BASICS.test(k)));
+// The request layer's settings (plan.md § 0) reach every script, so a script's requests pass the same checks.
+const NET = /^(READ_ONLY|ALLOWED_HOSTS|MANUAL_URL|LOG_DIR|RUN_ID|VARS_FILE)$/;
+const net = () => Object.fromEntries(Object.entries(process.env).filter(([k]) => NET.test(k)));
 
 /**
  * Where `name` points inside `root` (scripts/), or null. Only a plain relative path counts: no absolute, UNC
@@ -64,7 +68,7 @@ export default function (pi) {
       const out = await new Promise((done) => {
         const child = spawn(process.execPath, [file, ...(p.args ?? [])], {
           cwd: SCRIPTS,
-          env: { ...basics(), ...loadVars() },
+          env: { ...basics(), ...net(), ...loadVars() },
           stdio: ['ignore', 'pipe', 'pipe'],
           signal,
           timeout: TIMEOUT_MS,
@@ -72,8 +76,12 @@ export default function (pi) {
         let text = '';
         child.stdout.on('data', (d) => (text += d));
         child.stderr.on('data', (d) => (text += d));
-        child.on('error', (e) => done(`could not run: ${e.message}`));
-        child.on('close', (code) => done(`exit ${code}\n${text.length > MAX_OUT ? `${text.slice(0, MAX_OUT)}\n…(cut)` : text}`));
+        child.on('error', (e) => done(`could not run: ${mask(e.message)}`));
+        // Masked before the model sees it (plan.md § 0): a script that prints a secret by mistake shows {{NAME}}.
+        child.on('close', (code) => {
+          const shown = mask(text);
+          done(`exit ${code}\n${shown.length > MAX_OUT ? `${shown.slice(0, MAX_OUT)}\n…(cut)` : shown}`);
+        });
       });
       return { content: [{ type: 'text', text: out }], details: {} };
     },
