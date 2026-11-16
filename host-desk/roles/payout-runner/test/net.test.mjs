@@ -191,3 +191,29 @@ test('the attempt token from the manual is captured, masked, and usable as {{ATT
   const files = readdirSync(join(process.env.LOG_DIR, 'manual')).map((f) => readFileSync(join(process.env.LOG_DIR, 'manual', f), 'utf8')).join('');
   assert.ok(!files.includes('att_FAKE_'), 'a saved manual holds an attempt token');
 });
+
+test('a script write goes out only to a URL in WRITE_URLS', async () => {
+  delete process.env.WRITE_URLS;
+  const r = await send({ method: 'POST', url: `${base}/practice`, body: { a: 1 } });
+  assert.match(r.refused, /WRITE_URLS/);
+  assert.equal(hits.length, 0);
+  process.env.WRITE_URLS = `${base}/practice`;
+  const ok = await send({ method: 'POST', url: `${base}/practice`, body: { a: 1 } });
+  assert.equal(ok.status, 200);
+  const other = await send({ method: 'POST', url: `${base}/run`, body: { a: 1 } });
+  assert.match(other.refused, /WRITE_URLS/);
+  assert.equal(hits.length, 1);
+  delete process.env.WRITE_URLS;
+});
+
+test('secrets a script names in a reply are saved and masked before the log', async () => {
+  process.env.WRITE_URLS = `${base}/echo`;
+  const r = await send(
+    { method: 'POST', url: `${base}/echo`, body: { task: 'tsk_SECRET_abcdef' } },
+    { capture: (raw) => ({ TASK_1: JSON.parse(raw).youSent.body.match(/tsk_[A-Z_a-z]+/)[0] }) },
+  );
+  delete process.env.WRITE_URLS;
+  assert.ok(!r.body.includes('tsk_SECRET_abcdef'), 'reply holds the token');
+  assert.ok(!logText().includes('tsk_SECRET_abcdef'), 'log holds the token');
+  assert.match(r.body, /\{\{TASK_1\}\}/);
+});

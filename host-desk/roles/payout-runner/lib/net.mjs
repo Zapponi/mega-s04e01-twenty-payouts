@@ -24,6 +24,8 @@ export function config(env = process.env) {
     allowedHosts: String(env.ALLOWED_HOSTS ?? '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean),
     readOnly: env.READ_ONLY === '1',
     manualUrl: env.MANUAL_URL ?? '',
+    // Writes (any method but GET) are allowed only to these exact URLs, set per run or per script.
+    writeUrls: String(env.WRITE_URLS ?? '').split(',').map((w) => w.trim()).filter(Boolean),
     logDir: env.LOG_DIR ? resolve(env.LOG_DIR) : join(ROOT, 'logs'),
     runId: env.RUN_ID ?? '',
   };
@@ -63,6 +65,7 @@ export function refusal({ method, url, caller }, cfg = config()) {
   if (cfg.readOnly && method !== 'GET') return `READ_ONLY: ${method} is refused; only GET is allowed`;
   if (cfg.readOnly && !sameUrl(url, cfg.manualUrl)) return 'READ_ONLY: only the manual URL may be requested';
   if (caller === 'model' && method !== 'GET') return `the http tool sends GET only; writes go through the checked scripts in scripts/`;
+  if (method !== 'GET' && !cfg.writeUrls.some((w) => sameUrl(url, w))) return `${method} to this URL is not in WRITE_URLS (${cfg.writeUrls.join(', ') || 'empty'})`;
   return null;
 }
 
@@ -84,21 +87,31 @@ export function captureAttempt(rawText) {
     return false;
   }
   if (typeof attempt !== 'string' || attempt.length < 4) return false;
+  saveState({ ATTEMPT: attempt, ATTEMPT_SEEN_AT: new Date().toISOString() });
+  return true;
+}
+
+/**
+ * Writes run-time secrets into the state file, before anything is logged, so they are masked as {{NAME}}. A name that
+ * already holds another value keeps the old one as <NAME>_PREV_<n>, so old logs stay masked.
+ */
+export function saveState(pairs) {
   const file = STATE_FILE();
   let state = {};
   try {
     state = JSON.parse(readFileSync(file, 'utf8'));
   } catch {}
-  if (state.ATTEMPT && state.ATTEMPT !== attempt) {
-    let n = 1;
-    while (state[`ATTEMPT_PREV_${n}`]) n++;
-    state[`ATTEMPT_PREV_${n}`] = state.ATTEMPT;
+  for (const [k, v] of Object.entries(pairs)) {
+    if (!/^[A-Z][A-Z0-9_]*$/.test(k) || typeof v !== 'string') continue;
+    if (state[k] && state[k] !== v && !k.endsWith('_SEEN_AT')) {
+      let n = 1;
+      while (state[`${k}_PREV_${n}`]) n++;
+      state[`${k}_PREV_${n}`] = state[k];
+    }
+    state[k] = v;
   }
-  state.ATTEMPT = attempt;
-  state.ATTEMPT_SEEN_AT = new Date().toISOString();
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, JSON.stringify(state, null, 2), { mode: 0o600 });
-  return true;
 }
 
 const maskHeaders = (h, vars) => Object.fromEntries(Object.entries(h).map(([k, v]) => [k, mask(v, vars)]));
@@ -138,6 +151,17 @@ export async function send({ method = 'GET', url, headers = {}, body, caller = '
     const raw = await res.text();
     const isManual = res.status === 200 && cfg.manualUrl && sameUrl(target, cfg.manualUrl);
     if (isManual && captureAttempt(raw) && !opts.vars) vars = loadVars();
+    // A script names the secrets a reply carries (task tokens, …); they are saved and masked before the log.
+    if (opts.capture) {
+      let pairs = {};
+      try {
+        pairs = opts.capture(raw) ?? {};
+      } catch {}
+      if (Object.keys(pairs).length) {
+        saveState(pairs);
+        if (!opts.vars) vars = loadVars();
+      }
+    }
     const text = mask(raw, vars);
     const resHeaders = maskHeaders(Object.fromEntries(res.headers), vars);
     log(cfg, {
