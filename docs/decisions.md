@@ -19,3 +19,4 @@ A changed decision gets a new line that names the one it replaces. Findings (wha
 2026-11-16 — flow-ok: plan-late — o commit 3a0a1ba entrou antes da revisão do plano por duas famílias; a revisão roda agora, antes de mais trabalho — who: human ("2 - Sim, confirmo")
 2026-11-16 — flow-ok: issues-late — o commit 3a0a1ba entrou antes do sim na tabela de issues; a tabela vem antes da próxima issue — who: human ("2 - Sim, confirmo")
 2026-11-16 — O commit 3a0a1ba fica em main; daqui em diante só por branch e PR — who: human ("2 - Sim, confirmo")
+2026-11-16 — Fatia 1 lê o manual real cedo, em modo só leitura (GET travado em código); se o relógio começar na leitura, parar e avisar — who: human ("2 - aceito")
