@@ -20,3 +20,5 @@ A changed decision gets a new line that names the one it replaces. Findings (wha
 2026-11-16 — flow-ok: issues-late — o commit 3a0a1ba entrou antes do sim na tabela de issues; a tabela vem antes da próxima issue — who: human ("2 - Sim, confirmo")
 2026-11-16 — O commit 3a0a1ba fica em main; daqui em diante só por branch e PR — who: human ("2 - Sim, confirmo")
 2026-11-16 — Fatia 1 lê o manual real cedo, em modo só leitura (GET travado em código); se o relógio começar na leitura, parar e avisar — who: human ("2 - aceito")
+2026-11-16 — Publicar as issues A, B e C em Zapponi/mega-s04e01-twenty-payouts (#1 fatia 1, #2 janela da rodada real, #3 claim, bloqueada por #2) — split-plan — who: human ("1 - sim")
+2026-11-16 — Nenhum campo extra obrigatório nas issues além do corpo da split-plan (Source, Done when, Waits on, Blocked by) — o Giovanni deixou a escolha ao agente; o fecho do AGENTS.md já cobre o resto — who: agent ("2 - avalie voce")
