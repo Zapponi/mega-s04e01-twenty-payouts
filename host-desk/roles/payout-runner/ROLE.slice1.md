@@ -5,7 +5,7 @@ You read the course API manual and summarize it. You do not run the batch in thi
 ## Steps
 
 1. Call `vars` to see the secret names. The ticket is `{{TICKET}}`.
-2. Call `http` once: `GET https://hq.mega.dev/challenges/twenty-payouts/api` with the header `Authorization: Bearer {{TICKET}}`.
+2. Call `http` once: `GET https://hq.mega.dev/challenges/twenty-payouts/manual` with the header `Authorization: Bearer {{TICKET}}`. The reply holds `{ attempt, manual }`; the attempt token shows as `{{ATTEMPT}}`.
 3. If the reply is not 200, report the status and the body as they came, and stop. Do not try other URLs.
 4. Write a plain summary of the manual, with these headings:
    - Endpoints (method, path, what each does)

@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const LOGS = join(ROOT, 'logs');
-const MANUAL_URL = 'https://hq.mega.dev/challenges/twenty-payouts/api';
+const DEFAULT_MANUAL_URL = 'https://hq.mega.dev/challenges/twenty-payouts/api';
 const args = process.argv.slice(2);
 const slice = args.includes('--slice') ? args[args.indexOf('--slice') + 1] : null;
 const all = args.includes('--all');
@@ -29,13 +29,20 @@ function unitTests() {
   check('unit', r.status === 0, `request layer tests: ${pass} pass, ${fail} fail (node --test ${relative(ROOT, dir)}/)`);
 }
 
+const STATE = join(ROOT, 'host-desk/roles/payout-runner/scripts/state/vars.json');
 function secretValues() {
+  let out;
   try {
     const raw = JSON.parse(readFileSync(join(ROOT, 'host-desk/vars.json'), 'utf8'));
-    return Object.entries(raw).filter(([, v]) => typeof v === 'string' && v.length >= 4 && !v.startsWith('<'));
+    out = Object.entries(raw).filter(([, v]) => typeof v === 'string' && v.length >= 4 && !v.startsWith('<'));
   } catch {
     return null;
   }
+  try {
+    const st = JSON.parse(readFileSync(STATE, 'utf8'));
+    out.push(...Object.entries(st).filter(([k, v]) => /^ATTEMPT(_PREV_\d+)?$/.test(k) && typeof v === 'string' && v.length >= 4));
+  } catch {}
+  return out;
 }
 
 function walk(dir, out = []) {
@@ -56,6 +63,7 @@ function m5() {
   if (git.status !== 0) return check('M5', false, 'git ls-files failed; cannot list the repo tree');
   const files = new Set([...git.stdout.split('\0').filter(Boolean).map((f) => join(ROOT, f)), ...walk(LOGS), ...walk(join(ROOT, 'journal'))]);
   files.delete(join(ROOT, 'host-desk/vars.json'));
+  files.delete(STATE);
   const hits = [];
   for (const f of files) {
     let text;
@@ -91,10 +99,12 @@ function slice1() {
   const runFile = runs.at(-1);
   const runId = runFile.slice(4, -4);
   const started = statSync(join(LOGS, runFile)).birthtimeMs || statSync(join(LOGS, runFile)).ctimeMs;
+  const header = readFileSync(join(LOGS, runFile), 'utf8').split('\n')[0];
+  const MANUAL_URL = / · manual (\S+)/.exec(header)?.[1] ?? DEFAULT_MANUAL_URL;
   const recs = readLog().filter((r) => r.run === runId);
   const sent = recs.filter((r) => !r.refused);
   const refused = recs.filter((r) => r.refused);
-  check('S1.get200', sent.some((r) => r.method === 'GET' && r.status === 200 && sameUrl(r.url, MANUAL_URL)), `run ${runId}: ${sent.length} sent, statuses ${sent.map((r) => r.status ?? r.error).join(', ') || 'none'}`);
+  check('S1.get200', sent.some((r) => r.method === 'GET' && r.status === 200 && sameUrl(r.url, MANUAL_URL)), `run ${runId} (${MANUAL_URL}): ${sent.length} sent, statuses ${sent.map((r) => r.status ?? r.error).join(', ') || 'none'}`);
   const writes = sent.filter((r) => r.method !== 'GET');
   check('S1.onlyGET', writes.length === 0, writes.length ? `${writes.length} non-GET sent: ${writes.map((r) => r.method).join(', ')}` : 'no method other than GET was sent');
   const others = sent.filter((r) => !sameUrl(r.url, MANUAL_URL));

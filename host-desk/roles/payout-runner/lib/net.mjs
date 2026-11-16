@@ -8,10 +8,10 @@
 // - Redirects are followed by hand, and every hop passes the same checks.
 // - Every request, reply and refusal is appended to <LOG_DIR>/requests.jsonl, each vars value replaced by {{NAME}}.
 // - A 200 reply to MANUAL_URL is saved, masked, under <LOG_DIR>/manual/.
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { fillVars, loadVars } from '../extensions/vars.mjs';
+import { fillVars, loadVars, STATE_FILE } from '../extensions/vars.mjs';
 
 // host-desk/roles/payout-runner/lib/net.mjs → repo root
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
@@ -71,6 +71,36 @@ function log(cfg, record) {
   appendFileSync(join(cfg.logDir, 'requests.jsonl'), `${JSON.stringify(record)}\n`);
 }
 
+/**
+ * The manual reply carries { attempt, manual }; the attempt token authorizes /parked, so it is a secret. It is saved
+ * as ATTEMPT in the state file (earlier ones kept as ATTEMPT_PREV_<n>, so old logs stay masked) before anything is
+ * logged or shown. Returns true when an attempt was captured.
+ */
+export function captureAttempt(rawText) {
+  let attempt;
+  try {
+    attempt = JSON.parse(rawText)?.attempt;
+  } catch {
+    return false;
+  }
+  if (typeof attempt !== 'string' || attempt.length < 4) return false;
+  const file = STATE_FILE();
+  let state = {};
+  try {
+    state = JSON.parse(readFileSync(file, 'utf8'));
+  } catch {}
+  if (state.ATTEMPT && state.ATTEMPT !== attempt) {
+    let n = 1;
+    while (state[`ATTEMPT_PREV_${n}`]) n++;
+    state[`ATTEMPT_PREV_${n}`] = state.ATTEMPT;
+  }
+  state.ATTEMPT = attempt;
+  state.ATTEMPT_SEEN_AT = new Date().toISOString();
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify(state, null, 2), { mode: 0o600 });
+  return true;
+}
+
 const maskHeaders = (h, vars) => Object.fromEntries(Object.entries(h).map(([k, v]) => [k, mask(v, vars)]));
 
 /**
@@ -79,7 +109,7 @@ const maskHeaders = (h, vars) => Object.fromEntries(Object.entries(h).map(([k, v
  */
 export async function send({ method = 'GET', url, headers = {}, body, caller = 'script', signal } = {}, opts = {}) {
   const cfg = opts.cfg ?? config();
-  const vars = opts.vars ?? loadVars();
+  let vars = opts.vars ?? loadVars();
   method = String(method).toUpperCase();
   const base = { time: new Date().toISOString(), run: cfg.runId, caller, method };
   let target = fillVars(url, vars);
@@ -105,7 +135,10 @@ export async function send({ method = 'GET', url, headers = {}, body, caller = '
       log(cfg, { ...base, hop, url: mask(target, vars), reqHeaders: maskHeaders(h, vars), reqBody: payload === undefined ? undefined : mask(payload, vars), error });
       return { ok: false, error, url: mask(target, vars), body: '' };
     }
-    const text = mask(await res.text(), vars);
+    const raw = await res.text();
+    const isManual = res.status === 200 && cfg.manualUrl && sameUrl(target, cfg.manualUrl);
+    if (isManual && captureAttempt(raw) && !opts.vars) vars = loadVars();
+    const text = mask(raw, vars);
     const resHeaders = maskHeaders(Object.fromEntries(res.headers), vars);
     log(cfg, {
       ...base,
@@ -121,7 +154,7 @@ export async function send({ method = 'GET', url, headers = {}, body, caller = '
       target = new URL(res.headers.get('location'), target).href;
       continue;
     }
-    if (res.status === 200 && cfg.manualUrl && sameUrl(target, cfg.manualUrl)) {
+    if (isManual) {
       const dir = join(cfg.logDir, 'manual');
       mkdirSync(dir, { recursive: true });
       const stamp = base.time.replace(/[:.]/g, '-');

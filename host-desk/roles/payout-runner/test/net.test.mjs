@@ -14,6 +14,7 @@ const FAKE = { TICKET: 'tkt_FAKE_1234567890_abcdef', PAYOUT_KEY: 'pk_FAKE/key+wi
 writeFileSync(join(tmp, 'vars.json'), JSON.stringify(FAKE));
 process.env.VARS_FILE = join(tmp, 'vars.json');
 process.env.LOG_DIR = join(tmp, 'logs');
+process.env.STATE_FILE = join(tmp, 'state', 'vars.json');
 process.env.RUN_ID = 'test';
 
 const { send, mask } = await import('../lib/net.mjs');
@@ -38,6 +39,10 @@ before(async () => {
       if (req.url === '/redirect-in') {
         res.writeHead(302, { location: '/manual' });
         return res.end();
+      }
+      if (req.url.startsWith('/attempt-manual')) {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ attempt: `att_FAKE_${req.url.split('=')[1]}_zzzz`, manual: 'Use Bearer <attempt> on /parked.' }));
       }
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ youSent: { method: req.method, url: req.url, auth: req.headers.authorization, ua: req.headers['user-agent'], body } }));
@@ -166,4 +171,23 @@ test('code tool output is masked before the model sees it', async () => {
   } finally {
     rmSync(join(scripts, name), { force: true });
   }
+});
+
+test('the attempt token from the manual is captured, masked, and usable as {{ATTEMPT}}', async () => {
+  process.env.READ_ONLY = '1';
+  process.env.MANUAL_URL = `${base}/attempt-manual?n=1`;
+  const r1 = await tools.http.execute('1', { url: `${base}/attempt-manual?n=1` });
+  assert.match(r1.content[0].text, /\{\{ATTEMPT\}\}/);
+  assert.ok(!r1.content[0].text.includes('att_FAKE_1_zzzz'), 'tool result holds the attempt');
+  process.env.MANUAL_URL = `${base}/attempt-manual?n=2`;
+  await send({ url: `${base}/attempt-manual?n=2` });
+  delete process.env.READ_ONLY;
+  await send({ url: `${base}/echo`, headers: { Authorization: 'Bearer {{ATTEMPT}}' } });
+  assert.equal(hits.at(-1).headers.authorization, 'Bearer att_FAKE_2_zzzz', 'the newest attempt is filled in');
+  const log = logText();
+  assert.ok(!log.includes('att_FAKE_1_zzzz') && !log.includes('att_FAKE_2_zzzz'), 'the log holds an attempt token');
+  const state = JSON.parse(readFileSync(process.env.STATE_FILE, 'utf8'));
+  assert.equal(state.ATTEMPT_PREV_1, 'att_FAKE_1_zzzz', 'the earlier attempt is kept for masking');
+  const files = readdirSync(join(process.env.LOG_DIR, 'manual')).map((f) => readFileSync(join(process.env.LOG_DIR, 'manual', f), 'utf8')).join('');
+  assert.ok(!files.includes('att_FAKE_'), 'a saved manual holds an attempt token');
 });

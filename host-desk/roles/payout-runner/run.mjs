@@ -54,7 +54,7 @@ const child = spawn(process.platform === 'win32' ? 'pi.cmd' : 'pi', args, {
 const cfg = config();
 mkdirSync(cfg.logDir, { recursive: true });
 const runLog = createWriteStream(join(cfg.logDir, `run-${cfg.runId}.log`), { flags: 'a' });
-runLog.write(`# run ${cfg.runId} · model ${process.env.MODEL ?? '(pi default)'} · READ_ONLY=${process.env.READ_ONLY ?? ''} · role ${role}\n`);
+runLog.write(`# run ${cfg.runId} · model ${process.env.MODEL ?? '(pi default)'} · READ_ONLY=${process.env.READ_ONLY ?? ''} · role ${role} · manual ${process.env.MANUAL_URL}\n`);
 function tee(stream, out) {
   let rest = '';
   stream.setEncoding('utf8');
