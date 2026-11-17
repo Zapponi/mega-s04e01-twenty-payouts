@@ -77,6 +77,7 @@ Se o manual contradisser este brief, eu paro e pergunto.
 | Nota `[fim]` com o resultado (table) | thread do megadev no T3 | 2026-11-16 ("3 - sim, aprovo") |
 | Push da branch e PR do port para Linux do kit | `Zapponi/mega-agent-kit` | 2026-11-16 ("SIM, e vamos seguindo o challenge") |
 | Abrir a prática (`POST /practice`) na tentativa nº 1, por script, sem responder nem pagar | API do curso `hq.mega.dev` | 2026-11-16 ("1 - sim", à pergunta "Abrir a prática hoje à noite?") |
+| Ensaio da prática real com o código novo: um `GET /manual` (tentativa nova), `check-key`, prática de 3 tarefas pelo agente (~5 chamadas, < US$0,02); sem `POST /run` | API do curso `hq.mega.dev`, `verify-s04`, `pay-s04` (chave de prática) | 2026-11-17 ("Vamos fazer o 1 e o opcional", à pergunta do ensaio) |
 
 Fora desta tabela, e perguntados na hora: a rodada real contra a API do curso (fatia 3, provável disparo do relógio) e o `claim-challenge`.
 
