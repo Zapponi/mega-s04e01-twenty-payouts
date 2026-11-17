@@ -107,6 +107,16 @@ test('secret scope: char-by-char encoding, mixed hex case and a redirect hop nev
   assert.equal(mask(`k=${enc}`, FAKE), 'k={{PAYOUT_KEY}}', 'masking sees the char-encoded value too');
 });
 
+test('masking an encoded secret leaves the JSON around it intact, so a refusal is still read (Sol re-review)', () => {
+  const enc = [...FAKE.TICKET].map((c, i) => `%${c.charCodeAt(0).toString(16)[i % 2 ? 'toUpperCase' : 'toLowerCase']()}`).join('');
+  const body = JSON.stringify({ status: 'refused', need: 'payout-run', message: `a %22quoted%22 note, t=${enc}` });
+  const out = mask(body, FAKE);
+  const parsed = JSON.parse(out);
+  assert.equal(parsed.status, 'refused');
+  assert.equal(parsed.need, 'payout-run');
+  assert.equal(parsed.message, 'a %22quoted%22 note, t={{TICKET}}');
+});
+
 test('mask covers raw and URL-encoded values', () => {
   const s = `a ${FAKE.PAYOUT_KEY} b ${encodeURIComponent(FAKE.PAYOUT_KEY)} c`;
   assert.equal(mask(s, FAKE), 'a {{PAYOUT_KEY}} b {{PAYOUT_KEY}} c');

@@ -103,6 +103,17 @@ export function decodeAll(s) {
   return cur;
 }
 
+/** A regex matching v with each character either as itself or as %HH (hex in any case). */
+function encodedSpan(v) {
+  const hexCase = (h) => [...h].map((d) => (/[a-f]/i.test(d) ? `[${d.toLowerCase()}${d.toUpperCase()}]` : d)).join('');
+  const part = (c) => {
+    const lit = c.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+    const code = c.charCodeAt(0);
+    return code < 128 ? `(?:${lit}|%${hexCase(code.toString(16).padStart(2, '0'))})` : lit;
+  };
+  return new RegExp([...v].map(part).join(''), 'g');
+}
+
 /** Why this request may not carry the secrets it holds to this URL, or null. */
 export function scopeRefusal(target, outgoing, vars, cfg = config()) {
   const plain = decodeAll(outgoing);
@@ -129,12 +140,9 @@ export function mask(text, vars = loadVars()) {
   for (const [k, v] of pairs) {
     for (const form of new Set([v, encodeURIComponent(v)])) s = s.split(form).join(`{{${k}}}`);
   }
-  // a value hidden by other percent-encodings (char by char, mixed case): mask the decoded text instead (Sol P1)
-  const plain = decodeAll(s);
-  if (plain !== s && pairs.some(([, v]) => plain.includes(v))) {
-    s = plain;
-    for (const [k, v] of pairs) s = s.split(v).join(`{{${k}}}`);
-  }
+  // a value hidden by other percent-encodings (char by char, mixed hex case): mask only that span, so the text around
+  // it (JSON, a refusal) stays as it was (Sol re-review: decoding the whole text corrupted JSON)
+  if (/%[0-9a-fA-F]{2}/.test(s)) for (const [k, v] of pairs) s = s.replace(encodedSpan(v), `{{${k}}}`);
   return s;
 }
 
