@@ -37,9 +37,4 @@ After a crash, a new session picks up where the journal says. It never fetches t
 - No model run of `ROLE.md`. The real API was not touched (no paid call was allowed in #6). The lab (#7) runs it against the fake.
 - The real shape of `/parked`, of the POST /parked reply, of a refusal, and of a whole-run deadline (if any). The fake follows the index. M2 checks each task against the `timeLeftMs` it showed.
 - `./verify`: M1–M4, M6 and M7 fail until the real batch runs (no run in the log).
-- M5 now also searches for VERIFY_PATH and the task tokens, and it fails on 3 old local files from the slice-1 run of attempt nº 1. Those files are git-ignored and were written before the path was captured. They are:
-  - `logs/manual/manual-2026-11-16T23-04-18-324Z.txt`
-  - `logs/requests.jsonl`
-  - `logs/run-2026-11-16T23-04-14-108Z.log`
-
-  Re-masking them waits on Giovanni's yes.
+- M5 now also searches for VERIFY_PATH and the task tokens. Three old local logs from the slice-1 run of attempt nº 1 held the raw path. They were re-masked with Giovanni's yes, one replacement per file, and M5 passes (2026-11-16).
