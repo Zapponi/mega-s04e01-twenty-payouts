@@ -12,6 +12,11 @@ Not checked yet. The keep skill's scripts/keep-check.mjs fills this part. Never 
 <!-- keep:can-run:end -->
 
 ## Findings
+- A checagem da chave real (`GET verify-s04` com X-Payout-Key) responde 200 `{"status":"ok","message":"Received.","next":"Go on with the run."}` · source: logs/requests.jsonl run rehearse-2026-11-17T03-00-* · how: ran
+- Ensaio da prática com o código novo: 3/3 pagas uma vez à conta cadastrada e respondidas; da tarefa à resposta 2,3 s, 1,8 s e 4,0 s, contra 8 s · source: logs/requests.jsonl run rehearse-practice-2026-11-17T03-0* · how: ran
+- Uma nova busca de /manual deu outra conta cadastrada (`acct_dd346d294e`) e uma tentativa que vale 3 h (até 06:00:29Z) · source: mesma resposta de /manual · how: ran
+- As reservas reais da prática trazem só id, checkIn, checkOut, nightlyRate, cleaningFee e currency; o `settle` recusa qualquer campo além desses · source: logs/requests.jsonl run rehearse-practice · how: ran
+- Com um processo pesado de outra sessão na máquina (9 GB, 50% de CPU), os testes ficaram cerca de 10× mais lentos; no dia do lote a máquina precisa estar livre · source: ps/uptime em 2026-11-17 02:1x UTC · how: ran
 - Prática completa pelo agente (haiku-5.5, arquitetura híbrida): 3 tarefas pagas uma vez e respondidas (1750, 1745, 2110 EUR), resposta final `{"status":"done","message":"Practice is done. Start the run with your attempt when the agent is ready."}` · source: logs/requests.jsonl run 2026-11-17T00-06-18-066Z + journal/journal.jsonl · how: ran
 - O limite é por tarefa: cada tarefa nova chega com `timeLeftMs: 8000`; da tarefa ao pagamento o agente levou ~2,2–2,9 s, a prática inteira 7,2 s · source: logs/requests.jsonl run 2026-11-17T00-06-18-066Z (horários) · how: ran
 - Um novo `POST /practice` com `{ attempt }` reabre a prática na tarefa 1 com o relógio cheio (a tarefa 1 aberta às 23:50Z tinha vencido) · source: mesmo log, 1ª linha · how: ran
