@@ -19,7 +19,7 @@ After a crash, a new session picks up where the journal says. It never fetches t
 
 | Check | Shown by | Result |
 |---|---|---|
-| Every case of plan.md § 3 passes, with no model and no outside host | `node --test host-desk/roles/payout-runner/test/*.test.mjs` | match: 50 pass, 0 fail (2026-11-16) |
+| Every case of plan.md § 3 passes, with no model and no outside host | `node --test host-desk/roles/payout-runner/test/*.test.mjs` | match: 50 pass, 0 fail when #6 closed (2026-11-16); 73 pass, 0 fail after #7 and the review fixes (PR #9) |
 | `parked.mjs`: on-file, new (structured field only), decline, null → wait; decision journaled before the first write | core.test.mjs: owner wait, decision ×3, twice, late payout, conflicting decisions, account from text | match |
 | `check-key.mjs`: GET verify-s04 with X-Payout-Key; the path is never printed | core.test.mjs "check-key" | match |
 | Manual fetched once per attempt; restart continues at task 8; nothing paid twice | core.test.mjs "restart" ×2, "manual is fetched once" | match |
