@@ -48,3 +48,4 @@ A changed decision gets a new line that names the one it replaces. Findings (wha
 2026-11-17 — Rodada real nº 2 depois de o Giovanni dormir, antes de o ticket vencer (18:44 BRT de 17/11); sem mudar código (a tentativa do ensaio vence 06:00 UTC) — who: human ("prefiro fazer amanha, preciso dormir")
 - 2026-11-17 who: human — "1 - logico, nao pode travar / 2 - tudo bem. / Nao quero esperar 11brt": tarefa sem recibo vai ao dono e o lote segue; uma rodada de lab com o modelo; NEW_ATTEMPT=1 encerra a tentativa aberta em vez de esperar 14:55 UTC.
 - 2026-11-17 who: human — "1 e 2": um lab com o modelo; se verde, a rodada real nº 4 com NEW_ATTEMPT=1.
+- 2026-11-17 who: human — "Se o curso aceitou, nao tem flag / 2 - autorizo": M2 (23 ms no nosso relógio) aceito com a evidência da API; claim-challenge autorizado.
