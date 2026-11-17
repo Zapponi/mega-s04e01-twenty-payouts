@@ -43,3 +43,4 @@ A changed decision gets a new line that names the one it replaces. Findings (wha
 2026-11-16 — Contar a rodada nº 3 (checagens L verdes; 1ª conferência saiu 1 por teste intermitente, sem relação com o modelo) e fechar a #7; seguir para a #8 — who: human ("pode seguir", à pergunta com a opção 1 recomendada)
 2026-11-17 — /rehearse numa branch (8-rehearse) com PR para main — check-flow --release (12 linhas sem resultado) — who: human ("Vamos fazer o 1 e o opcional")
 2026-11-17 — Ensaio da prática real com o código novo: GET /manual (tentativa nova), check-key, prática pelo agente (~5 chamadas, < US$0,02), sem POST /run; linha nova em BRIEF.md "Outside actions approved" — who: human ("Vamos fazer o 1 e o opcional")
+2026-11-17 — Rodada real do lote agora (MODE=run, ALLOW_RUN=1, haiku-5.5, ~40 chamadas, < US$0,15), com o Giovanni na página do Challenge — issue #8 — who: human ("bora", em resposta ao pedido de horário e de sim para a rodada real)

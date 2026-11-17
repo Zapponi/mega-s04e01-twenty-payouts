@@ -12,6 +12,10 @@ Not checked yet. The keep skill's scripts/keep-check.mjs fills this part. Never 
 <!-- keep:can-run:end -->
 
 ## Findings
+- CORREÇÃO: o limite do lote real é do lote INTEIRO, não por tarefa: a tarefa 1 do /run veio com `runLimitMs: 6000, timeLeftMs: 6000` e a tarefa 2 com `timeLeftMs: 184` (o tempo é compartilhado pelas 20). Na prática cada tarefa vinha com 8000 e isso enganou. A linha "O limite é por tarefa" abaixo está ERRADA para o /run · source: logs/requests.jsonl run real-run-2026-11-17T03-06-* · how: ran
+- Um lote recusado por tempo responde 422 `{"status":"refused","message":"Time ran out at task 2.","next":"Fetch the manual again: each fetch starts a new run. Payouts from a refused run do not count.","pointer":"check-lane has a need for this: routine-script."}` · source: mesmo log · how: ran
+- `check-lane` need `routine-script`: "Move repeated tasks into a script your agent runs… code that runs them all in one go, with one open connection. The model writes the script, reads what it reports, and judges only what the script cannot decide." Contrato: "the routine items done by code in one run, with a log you can read after it" · source: check-lane 2026-11-17 03:1x UTC · how: ran
+- Tempos reais por processo novo (TLS a cada script): pagamento ~0,2–0,4 s, resposta ~0,1 s; 20 tarefas × ~0,3 s não cabem com folga em 6 s sem conexão reaproveitada · source: logs/requests.jsonl run real-run (horários) · how: ran
 - A checagem da chave real (`GET verify-s04` com X-Payout-Key) responde 200 `{"status":"ok","message":"Received.","next":"Go on with the run."}` · source: logs/requests.jsonl run rehearse-2026-11-17T03-00-* · how: ran
 - Ensaio da prática com o código novo: 3/3 pagas uma vez à conta cadastrada e respondidas; da tarefa à resposta 2,3 s, 1,8 s e 4,0 s, contra 8 s · source: logs/requests.jsonl run rehearse-practice-2026-11-17T03-0* · how: ran
 - Uma nova busca de /manual deu outra conta cadastrada (`acct_dd346d294e`) e uma tentativa que vale 3 h (até 06:00:29Z) · source: mesma resposta de /manual · how: ran
