@@ -120,8 +120,10 @@ test('a second settle of the same task never pays twice', async () => {
   // make the answer fail so the task stays current
   const r1 = await run('settle.mjs', 'practice', 'pay');
   assert.equal(r1.code, 0);
-  // reopen the same task 1 as current and try again
-  await run('start.mjs', 'practice');
+  // the same task 1 shows again as current (a replayed reply), and settle runs again
+  const sd = dirname(env.STATE_FILE);
+  writeFileSync(join(sd, 'current-practice.json'), readFileSync(join(sd, 'task-practice-1.json')));
+  assert.notEqual((await run('start.mjs', 'practice')).code, 0, 'practice never opens twice in one attempt');
   const r2 = await run('settle.mjs', 'practice', 'pay');
   assert.notEqual(r2.code, 0);
   assert.match(r2.out, /no second payout/);

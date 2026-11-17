@@ -9,6 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { checks } from './proof/checks.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const LOGS = join(ROOT, 'logs');
@@ -26,7 +27,7 @@ function unitTests() {
   const r = spawnSync(process.execPath, ['--test', ...files], { encoding: 'utf8' });
   const pass = /# pass (\d+)/.exec(r.stdout)?.[1] ?? '0';
   const fail = /# fail (\d+)/.exec(r.stdout)?.[1] ?? '?';
-  check('unit', r.status === 0, `request layer tests: ${pass} pass, ${fail} fail (node --test ${relative(ROOT, dir)}/)`);
+  check('unit', r.status === 0, `unit tests: ${pass} pass, ${fail} fail (node --test ${relative(ROOT, dir)}/)`);
 }
 
 const STATE = join(ROOT, 'host-desk/roles/payout-runner/scripts/state/vars.json');
@@ -40,7 +41,7 @@ function secretValues() {
   }
   try {
     const st = JSON.parse(readFileSync(STATE, 'utf8'));
-    out.push(...Object.entries(st).filter(([k, v]) => /^ATTEMPT(_PREV_\d+)?$/.test(k) && typeof v === 'string' && v.length >= 4));
+    out.push(...Object.entries(st).filter(([k, v]) => /^(ATTEMPT|VERIFY_PATH|CUR_TASK|TASK_[A-Z]+_\d+)(_PREV_\d+)?$/.test(k) && typeof v === 'string' && v.length >= 4));
   } catch {}
   return out;
 }
@@ -117,12 +118,28 @@ function slice1() {
   if (refused.length) console.log(`note: ${refused.length} request(s) refused by the request layer in this run: ${refused.map((r) => `${r.method} ${r.url} (${r.refused})`).join('; ')}`);
 }
 
+const readJsonl = (f) => (existsSync(f) ? readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+
+// M1–M4, M6, M7 (proof/checks.mjs): the course's replies in logs/requests.jsonl from the last opened run on, the
+// journal, the manual saved for that attempt, and logs/check-lane.jsonl (one { need, time, result } line per
+// check-lane call the harness made).
+function mustChecks() {
+  const records = readLog();
+  const runOpen = records.filter((r) => r.method === 'POST' && /\/run\/?$/.test(new URL(r.url, 'http://x').pathname) && r.status >= 200 && r.status < 300 && /"attempt"/.test(r.reqBody ?? '')).at(-1);
+  const mdir = join(LOGS, 'manual');
+  const manuals = existsSync(mdir) ? readdirSync(mdir).filter((f) => /^manual-.+\.txt$/.test(f)).sort() : [];
+  const stamp = runOpen ? runOpen.time.replace(/[:.]/g, '-') : '';
+  const manualFile = manuals.filter((f) => !runOpen || f.slice(7, -4) <= stamp).at(-1);
+  const manualText = manualFile ? readFileSync(join(mdir, manualFile), 'utf8') : '';
+  return checks({ records, journal: readJsonl(join(ROOT, 'journal/journal.jsonl')), manualText, checkLane: readJsonl(join(LOGS, 'check-lane.jsonl')) });
+}
+
 unitTests();
 if (slice === '1') {
   slice1();
   m5();
 } else {
-  for (const id of ['M1', 'M2', 'M3', 'M4', 'M6', 'M7']) check(id, false, 'not built yet (plan.md § 3, § 4)');
+  for (const r of mustChecks()) check(r.id, r.ok, r.detail);
   m5();
   if (all) for (const id of ['K1', 'K2']) check(id, false, 'not built yet');
 }

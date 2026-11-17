@@ -7,7 +7,8 @@
 // READ_ONLY=1 (slice 1): ROLE.slice1.md as the system prompt; the request layer allows only GET to the manual URL.
 // MODE=practice: ROLE.practice.md; hosts hq.mega.dev + pay-s04.mega.dev; the model's http may not GET /manual (a
 // fetch opens a new attempt); writes happen only in scripts/start.mjs and scripts/settle.mjs, each with its own URLs.
-// Anything else refuses to start: the full run (ROLE.md, ALLOW_RUN=1) needs its own yes.
+// MODE=run with ALLOW_RUN=1: ROLE.md, the real batch; also verify-s04.mega.dev for the key check; the manual may be
+// fetched only while no attempt is open (MANUAL_ONCE=1). Anything else refuses to start.
 import { spawn } from 'node:child_process';
 import { createWriteStream, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -28,8 +29,21 @@ if (process.env.READ_ONLY === '1') {
   process.env.DENY_URLS = MANUAL;
   delete process.env.ALLOW_RUN;
   delete process.env.WRITE_URLS;
+} else if (process.env.MODE === 'run') {
+  // The real batch (plan.md § 6): only with ALLOW_RUN=1, the human's yes for this run. The model's http may fetch
+  // the manual, but only while no attempt is open (MANUAL_ONCE), so a restart never deals a new batch.
+  if (process.env.ALLOW_RUN !== '1') {
+    console.error('MODE=run needs ALLOW_RUN=1: the human\'s yes for this run (BRIEF.md "Outside actions approved"). Nothing was started.');
+    process.exit(2);
+  }
+  role = 'ROLE.md';
+  process.env.ALLOWED_HOSTS = 'hq.mega.dev,pay-s04.mega.dev,verify-s04.mega.dev';
+  process.env.MANUAL_URL = MANUAL;
+  process.env.MANUAL_ONCE = '1';
+  delete process.env.DENY_URLS;
+  delete process.env.WRITE_URLS;
 } else {
-  console.error('Run with READ_ONLY=1 (slice 1) or MODE=practice. The full run is not wired yet (plan.md § 6).');
+  console.error('Run with READ_ONLY=1 (slice 1), MODE=practice, or MODE=run with ALLOW_RUN=1 (the real batch).');
   process.exit(2);
 }
 process.env.RUN_ID ||= new Date().toISOString().replace(/[:.]/g, '-');

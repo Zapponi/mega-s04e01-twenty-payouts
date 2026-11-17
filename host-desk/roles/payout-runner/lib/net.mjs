@@ -19,11 +19,34 @@ export const USER_AGENT = 'payout-runner/1.0 (MEGA.dev host-desk)';
 const MAX_HOPS = 5;
 const LOCAL = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
+// An attempt lasts 3 h after the manual fetch (manual 2026-11-16: attemptExpiresAt = fetch + 3 h), used only when
+// the reply gave no attemptExpiresAt.
+const ATTEMPT_TTL_MS = 3 * 3_600_000;
+
+/** Until when the attempt in the state file is open (ms), or 0 when there is none. */
+export function attemptOpenUntil(st = readState()) {
+  if (!st.ATTEMPT) return 0;
+  const until = Date.parse(st.ATTEMPT_EXPIRES_AT ?? '') || Date.parse(st.ATTEMPT_SEEN_AT ?? '') + ATTEMPT_TTL_MS;
+  return Number.isFinite(until) ? until : 0;
+}
+
+function readState() {
+  try {
+    return JSON.parse(readFileSync(STATE_FILE(), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
 export function config(env = process.env) {
   return {
     allowedHosts: String(env.ALLOWED_HOSTS ?? '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean),
     readOnly: env.READ_ONLY === '1',
     manualUrl: env.MANUAL_URL ?? '',
+    // MANUAL_ONCE=1 (the run): a manual fetch is refused while the attempt in the state file is open, so a restart
+    // never deals a new batch ("Each fetch starts a new attempt", API index).
+    manualOnce: env.MANUAL_ONCE === '1',
+    attemptOpenUntil: env.MANUAL_ONCE === '1' ? attemptOpenUntil() : 0,
     // Writes (any method but GET) are allowed only to these exact URLs, set per run or per script.
     denyUrls: String(env.DENY_URLS ?? '').split(',').map((w) => w.trim()).filter(Boolean),
     writeUrls: String(env.WRITE_URLS ?? '').split(',').map((w) => w.trim()).filter(Boolean),
@@ -36,8 +59,13 @@ export function config(env = process.env) {
 export function mask(text, vars = loadVars()) {
   let s = String(text ?? '');
   // Facts kept in the state file that are not secrets: masking them would hide data the rules compare.
-  const PLAIN = /^(ACCOUNT_ON_FILE(_PREV_\d+)?|.*_SEEN_AT|.*_OPENED_AT)$/;
-  const pairs = Object.entries(vars).filter(([k, v]) => !PLAIN.test(k) && typeof v === 'string' && v.length >= 4).sort((a, b) => b[1].length - a[1].length);
+  const PLAIN = /^(ACCOUNT_ON_FILE(_PREV_\d+)?|.*_AT(_PREV_\d+)?)$/;
+  // Two names may hold one value (CUR_TASK and TASK_RUN_7): the per-task name wins, so a log line says which task
+  // it touched; a current name wins over an old _PREV_ one.
+  const rank = (k) => (/^TASK_[A-Z]+_\d+$/.test(k) ? 0 : /_PREV_\d+$/.test(k) ? 2 : 1);
+  const pairs = Object.entries(vars)
+    .filter(([k, v]) => !PLAIN.test(k) && typeof v === 'string' && v.length >= 4)
+    .sort((a, b) => b[1].length - a[1].length || rank(a[0]) - rank(b[0]));
   for (const [k, v] of pairs) {
     for (const form of new Set([v, encodeURIComponent(v)])) s = s.split(form).join(`{{${k}}}`);
   }
@@ -66,6 +94,9 @@ export function refusal({ method, url, caller }, cfg = config()) {
   if (!cfg.allowedHosts.includes(host)) return `host ${host} is not in ALLOWED_HOSTS (${cfg.allowedHosts.join(', ') || 'empty'})`;
   if (!LOCAL.has(host) && u.protocol !== 'https:') return 'only https is allowed outside localhost';
   if (cfg.denyUrls.some((d) => sameUrl(url, d))) return 'this URL is closed in this mode (DENY_URLS): a manual fetch would open a new attempt';
+  if (cfg.manualOnce && cfg.manualUrl && sameUrl(url, cfg.manualUrl) && cfg.attemptOpenUntil > Date.now()) {
+    return `the manual was already fetched and its attempt is open until ${new Date(cfg.attemptOpenUntil).toISOString()}; a new fetch would deal a new batch. Run journal.mjs status and continue`;
+  }
   if (cfg.readOnly && method !== 'GET') return `READ_ONLY: ${method} is refused; only GET is allowed`;
   if (cfg.readOnly && !sameUrl(url, cfg.manualUrl)) return 'READ_ONLY: only the manual URL may be requested';
   if (caller === 'model' && method !== 'GET') return `the http tool sends GET only; writes go through the checked scripts in scripts/`;
@@ -85,13 +116,15 @@ function log(cfg, record) {
  */
 export function captureAttempt(rawText) {
   let attempt;
+  let expires;
   try {
-    attempt = JSON.parse(rawText)?.attempt;
+    ({ attempt, attemptExpiresAt: expires } = JSON.parse(rawText) ?? {});
   } catch {
     return false;
   }
   if (typeof attempt !== 'string' || attempt.length < 4) return false;
-  saveState({ ATTEMPT: attempt, ATTEMPT_SEEN_AT: new Date().toISOString(), ...fromManual(rawText) });
+  const exp = typeof expires === 'string' && !Number.isNaN(Date.parse(expires)) ? { ATTEMPT_EXPIRES_AT: expires } : {};
+  saveState({ ATTEMPT: attempt, ATTEMPT_SEEN_AT: new Date().toISOString(), ...exp, ...fromManual(rawText) });
   return true;
 }
 
@@ -126,7 +159,7 @@ export function saveState(pairs) {
   } catch {}
   for (const [k, v] of Object.entries(pairs)) {
     if (!/^[A-Z][A-Z0-9_]*$/.test(k) || typeof v !== 'string') continue;
-    if (state[k] && state[k] !== v && !k.endsWith('_SEEN_AT')) {
+    if (state[k] && state[k] !== v && !k.endsWith('_AT')) {
       let n = 1;
       while (state[`${k}_PREV_${n}`]) n++;
       state[`${k}_PREV_${n}`] = state[k];

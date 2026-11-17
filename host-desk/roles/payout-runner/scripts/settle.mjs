@@ -3,8 +3,9 @@
 // settle <practice|run> answer         — re-send only the answer of a task already paid (receipt from the journal).
 // Every rule is checked here, not by the model. Anything off → no action, the reason is printed, the agent decides.
 // A payout whose result is unclear is journaled "uncertain" and never sent again by this script.
+// A refusal (a `need`, a status "refused", a 4xx) is journaled "refused" with its need; the task is never retried.
 import { amountOf, journal, statusOf, events, targetOf } from '../lib/batch.mjs';
-import { batchArg, batchUrl, captureTask, current, payoutsUrl, saveCurrent, show, state } from '../lib/flow.mjs';
+import { batchArg, batchUrl, captureTask, current, payoutsUrl, refusalOf, saveCurrent, show, state } from '../lib/flow.mjs';
 import { send } from '../lib/net.mjs';
 
 const TIMEOUT_MS = Number(process.env.SETTLE_TIMEOUT_MS || 4000);
@@ -20,11 +21,20 @@ const key = `${batch}:${task.n}:${st.ATTEMPT_SEEN_AT}`;
 const left = () => `timeLeftMs at the task: ${task.timeLeftMs ?? '?'}`;
 process.env.WRITE_URLS = [batchUrl(batch), payoutsUrl()].join(',');
 
+function refused(r, step) {
+  const ref = refusalOf(r);
+  if (!ref) return false;
+  journal({ key, status: 'refused', step, need: ref.need, why: ref.why, http: r.status });
+  console.log(`REFUSED task ${task.n} at ${step}: ${ref.why}${ref.need ? `; need: ${ref.need}` : ''}. Stop this task: do not retry or work around it. Report it; the harness calls check-lane with the need.`);
+  process.exit(5);
+}
+
 async function answer(receipt, amount) {
   const r = await send(
     { method: 'POST', url: batchUrl(batch), body: { task: '{{CUR_TASK}}', answer: amount, payout: receipt }, signal: AbortSignal.timeout(TIMEOUT_MS) },
-    { capture: captureTask },
+    { capture: captureTask(batch) },
   );
+  refused(r, 'answer');
   if (r.status && r.status < 300) {
     journal({ key, status: 'answered', amount, receipt, http: r.status });
     saveCurrent(batch, r.body);
@@ -39,14 +49,14 @@ async function answer(receipt, amount) {
 const done = statusOf(key);
 if (action === 'answer') {
   const paid = events().filter((e) => e.key === key && e.status === 'paid').at(-1);
-  if (!paid || done === 'answered') {
+  if (!paid || done !== 'paid') {
     console.log(`Nothing to re-answer for task ${task.n} (status ${done}).`);
     process.exit(1);
   }
   await answer(paid.receipt, paid.amount);
 }
 if (done) {
-  console.log(`Task ${task.n} already has status "${done}" in the journal: no second payout. ${done === 'uncertain' ? 'Tell the human.' : ''}`);
+  console.log(`Task ${task.n} already has status "${done}" in the journal: no second payout. ${done === 'uncertain' || done === 'sent' ? 'Tell the human.' : ''}`);
   process.exit(1);
 }
 
@@ -62,10 +72,11 @@ if (action === 'flag') {
   }
   const r = await send(
     { method: 'POST', url: batchUrl(batch), body: { task: '{{CUR_TASK}}', flag: 'needs-owner', reason }, signal: AbortSignal.timeout(TIMEOUT_MS) },
-    { capture: captureTask },
+    { capture: captureTask(batch) },
   );
+  refused(r, 'flag');
   if (r.status && r.status < 300) {
-    journal({ key, status: 'waiting_owner', reason, http: r.status });
+    journal({ key, status: 'waiting_owner', n: task.n, reason, http: r.status });
     saveCurrent(batch, r.body);
     console.log(`FLAGGED task ${task.n} for the owner. Next: ${show(r)}`);
     process.exit(0);
@@ -103,6 +114,7 @@ try {
   receipt = JSON.parse(p.body)?.receipt;
 } catch {}
 if (!(p.status >= 200 && p.status < 300) || typeof receipt !== 'string' || !receipt) {
+  refused(p, 'payout');
   journal({ key, status: 'uncertain', http: p.status, why: p.refused ?? p.error, body: p.body?.slice(0, 500) });
   console.log(`UNCERTAIN payout for task ${task.n}: ${show(p)}. It may or may not have gone through. Never send it again; tell the human. ${left()}`);
   process.exit(3);
