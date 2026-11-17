@@ -68,6 +68,25 @@ Se o manual contradisser este brief, eu paro e pergunto.
    - o manual contradisser este brief;
    - não estiver claro se uma tarefa pode ser fechada.
 
+## Glossary
+
+Os termos que o código, os testes e as conversas usam. Cada um vem do manual, das respostas da API ou do enunciado.
+
+| Termo | Significa | Fonte |
+|---|---|---|
+| tentativa (attempt) | cada `GET /manual` abre uma, com o próprio lote, por 3 h (`attemptExpiresAt`); só o humano encerra uma aberta (`NEW_ATTEMPT=1`) | resposta do `/manual`; KEEP.md; docs/decisions.md 2026-11-17 |
+| treino (practice) | 3 tarefas opcionais, 8000 ms por tarefa | resposta do `POST /practice`; KEEP.md |
+| lote (run) | as 20 tarefas reais; `runLimitMs` vale para o lote inteiro (6000 ms) | resposta do `POST /run` na rodada real nº 1; KEEP.md |
+| tarefa | uma reserva e um destino de pagamento, com um token próprio (`task`) | respostas de `/run` e `/practice` |
+| conta em arquivo | a única conta que o agente paga sozinho; outra conta é decisão do dono | manual: "Payouts go only to the account on file; any other account is the owner's call." |
+| valor | noites × diária + limpeza, em euros inteiros; noites = check-out menos check-in | manual, "Stays" |
+| tarefa do dono | uma tarefa que o agente sinaliza (`flag: needs-owner`) e não paga; o Giovanni decide na página do Challenge; o agente lê a decisão em `GET /parked` e conclui com `POST /parked` | enunciado; respostas de `/parked` |
+| decisão | `on-file`, `new` ou `decline`, lida só em `/parked`; falta de resposta nunca é "sim" | respostas de `/parked`; AGENTS.md |
+| recibo (receipt) | o que o pagamento devolve; vai com a resposta da tarefa; um 2xx sem recibo, ou com recusa, não é pagamento | resposta de `/payouts` |
+| recusa (refusal) | uma resposta com `status: refused` ou um 4xx; pode trazer `need` ou `pointer` para o `check-lane`; nunca é contornada | respostas reais das rodadas nº 1 e nº 3 |
+| escopo de segredo | para onde cada segredo pode ir: ticket e tentativa só para a API do curso; chave de pagamento só para `https://pay-s04.mega.dev/payouts` | check-lane `payout-run`; lib/net.mjs `scopeOf` |
+| ticket | o recibo do Challenge, entregue pelo `start-challenge`; autoriza o `/manual` e o claim | enunciado |
+
 ## Outside actions approved
 
 | Action | Where | Approved on |
