@@ -1,23 +1,58 @@
-# Handover — S04E01 Twenty payouts (2026-11-16)
-Objective: um agente (Host Desk `payout-runner`, Pi + vars/http/code) roda sozinho o lote de 20 pagamentos pela API do curso dentro do tempo-limite; claim aceito pelo curso (uuid c0000000-0000-4000-8000-0000005e04e1).
-Decisions: todas em `docs/decisions.md` com as palavras do Giovanni. Destaques: enunciado oficial é a fonte da verdade; prova aprovada ("1 -aprovo essa prova"); fatia 1 lê o manual cedo em modo só leitura ("2 - aceito"); modelo openrouter/anthropic/claude-haiku-5.5, limite 5 USD; tabela de ações aprovada ("3 - sim, aprovo").
+# Handover — S04E01 Twenty payouts (2026-11-17 00:10 UTC)
+
+Objective: um agente (Host Desk `payout-runner`, Pi + vars/http/code, modelo openrouter/anthropic/claude-haiku-5.5) roda sozinho o lote de 20 pagamentos pela API do curso, dentro do tempo-limite; claim aceito (uuid c0000000-0000-4000-8000-0000005e04e1).
+
+Decisions: todas em `docs/decisions.md`, com as palavras do Giovanni. Destaques de 2026-11-16:
+- **Arquitetura híbrida** ("1 - sim"): o agente lê e decide cada tarefa; `scripts/settle.mjs` confere, paga uma vez e responde.
+- **Quatro mudanças na prova** ("2 - aprovo"):
+  - outra conta vira flag do dono;
+  - o flag é a única escrita antes da decisão;
+  - M1 e M4 pelas respostas do curso no log + `/parked`;
+  - fatia 3 = prática + lote.
+- **Issues #4–#8** ("3- aprovo").
+- **Janela:** "eu te aviso".
+
 Current state:
-- Branch `kickoff-brief` (no GitHub), último commit com plan.md revisado (110c633) + sessions. `main` = 3a0a1ba (desvio já fechado com flow-ok). check-flow: PASS.
-- `BRIEF.md` formato kit, `AGENTS.md`, `plan.md` (§0–§7), `docs/reviews/2026-11-16-plan.md` (Sol + Claude, 13 achados, todos tratados).
-- Kit instalado no minijack (pwsh 7.4.6 em ~/.local/opt/pwsh, 17 hooks em ~/.claude/settings.json); port Linux em PR https://github.com/Zapponi/mega-agent-kit/pull/4 (aberto, falta /sol-loop e um teste no Windows).
-- Segredos: ticket + chave de prática em `host-desk/vars.json` (600, git-ignored); chave OpenRouter em `~/.pi/agent/auth.json`. Ticket vence 2026-11-17 21:44 UTC (18:44 BRT). Nunca ler/imprimir esses valores.
-- Nenhuma chamada paga ainda. Manual da API NÃO lido. start-challenge chamado uma vez (não chamar de novo; usar resume-challenge com o ticket de vars.json).
-Sources: enunciado = resposta do start-challenge + list-challenges; Host Desk = zip do curso; lições/logs = github.com/Zapponi/megadev; kit = ~/src/mega-agent-kit.
-Done when (BRIEF.md "Done when"): ✘ 20 tarefas no prazo · ✘ tarefas do dono decididas e concluídas · ✘ ./verify verde · ✘ claim aceito · ✘ debrief · ✘ megadev challenges/s04e01/log.md · ✘ nota [fim].
-Open questions (Giovanni):
-1. Publicar as issues A (fatia 1: plan §0+§1), B (janela da rodada real, espera Giovanni), C (claim e veredito, bloqueada por B) em Zapponi/mega-s04e01-twenty-payouts? — pergunta feita, sem resposta.
-2. Janela de horário da rodada real ("decidimos depois").
-Approvals: tabela "Outside actions approved" do BRIEF.md (push/PR/issues no repo; chamadas pagas ao OpenRouter com custo antes; nota [fim]; push+PR do kit). Rodada real e claim: perguntar na hora.
-Return route: ao terminar (ou bloqueado), `t3_thread_send` com environmentId fbf717ef-3cea-41d0-a0a8-8ce0e41ae96c, threadId 7aadc61f-9297-4086-a010-8892c9410baa, texto `[fim] S04E01 Twenty payouts: <result | question | blocked>`.
-Next 3 steps: 1. Obter o sim às issues A/B/C e publicá-las (split-plan). 2. Branch `<A>-slice-1`: construir plan §0 (lib/net.mjs, mascaramento, allowlist, READ_ONLY) + testes sem modelo, depois §1 com `./verify --slice 1`. 3. Pedir ok da rodada paga da fatia 1 (nº de chamadas e custo) e rodar; parar se o relógio começar.
-Read first: KEEP.md, BRIEF.md, AGENTS.md, plan.md, docs/reviews/2026-11-16-plan.md, docs/decisions.md, BRIEF-didatico-detalhado.md §5.
+- **Branch `1-slice-1`** (no GitHub), último commit c131d1a. `main` = 3a0a1ba; nada foi mesclado ainda. check-flow: PASS.
+- **Issues:**
+  - #1 e #5 fechadas;
+  - abertas: #2 (janela), #3 (claim), #4 (brief), #6 (núcleo), #7 (laboratório), #8 (dia do lote).
+- **Fatia 1:** feita. Manual real lido; regras e conta cadastrada no KEEP.md.
+- **Prática:** feita pelo agente, 3/3 (run 2026-11-17T00-06-18-066Z).
+  - O limite é **8 s por tarefa** (`timeLeftMs: 8000` a cada tarefa).
+  - O agente levou 2,2–2,9 s por tarefa.
+- **Já construído:**
+  - `lib/net.mjs`: allowlist de hosts, READ_ONLY, WRITE_URLS por script, DENY_URLS (bloqueia `/manual`), máscara com captura de ATTEMPT/CUR_TASK/VERIFY_PATH;
+  - `lib/batch.mjs`, `lib/flow.mjs`, `scripts/start.mjs`, `scripts/settle.mjs`;
+  - `ROLE.slice1.md`, `ROLE.practice.md`;
+  - `run.mjs` com `READ_ONLY=1` ou `MODE=practice`;
+  - 26 testes.
+- **Tentativa nº 1:** vence 2026-11-17 02:04 UTC. Para o lote, abrir uma tentativa nova no dia (um único `GET /manual`).
+- **Custo pago até agora:** 3 rodadas haiku, estimadas < US$0,10 no total.
+- **Segredos:** em `host-desk/vars.json` e `scripts/state/vars.json` (git-ignored). Nunca ler nem imprimir. O ticket vence 2026-11-17 21:44 UTC (18:44 BRT).
+
+Done when (BRIEF.md): ✘ 20 tarefas no prazo · ✘ tarefas do dono decididas e concluídas · ✘ `./verify` verde · ✘ claim aceito · ✘ debrief · ✘ megadev `challenges/s04e01/log.md` · ✘ nota [fim].
+
+Open questions (Giovanni): a janela da rodada real (#2). Proposta: 17/11, 15:00–16:30 BRT, com go/no-go às 15:00.
+
+Next 3 steps:
+1. **#6:**
+   - `parked.mjs` (polls ~110 s; on-file / new / decline / null; conta do `new` só de campo estruturado);
+   - `check-key.mjs` (usa VERIFY_PATH);
+   - `ROLE.md` do lote, a partir de `ROLE.practice.md`: passo 0 lê o diário, um único `/manual`, check-key, start run, loop, flag, parked, resumo;
+   - `MODE=run` com `ALLOW_RUN=1` no `run.mjs`;
+   - verify M1–M7.
+2. **#7:** dublê com o formato real e as armadilhas; `./verify --lab` verde em duas rodadas seguidas (pagas, anunciadas).
+3. **#8:** `/sol-loop` no diff inteiro, depois PR para `main` (classify-diff), depois a rodada real na janela, com o sim do Giovanni.
+
+Read first: KEEP.md, BRIEF.md, AGENTS.md, plan.md (seção "Status after § 2"), docs/decisions.md, docs/reviews/2026-11-16-plan.md.
+
+Return route: `t3_thread_send` (environmentId fbf717ef-3cea-41d0-a0a8-8ce0e41ae96c, threadId 7aadc61f-9297-4086-a010-8892c9410baa) com `[fim] S04E01 Twenty payouts: <result | question | blocked>`.
+
 Don't:
-- Commitar em main (os git hooks só existem nas branches pós-kickoff; ver KEEP.md).
-- Editar arquivos com scripts que falham no meio sem conferir (um registro de revisão chegou antes do plano).
-- Usar `!` antes de um comando que pode falhar por sintaxe para "provar" ausência (o git grep com erro passou como vazio).
-- Mostrar ou colar ticket, chaves ou JSON cru no chat. Escrever ao Giovanni em pt-BR.
+- Chamar `start-challenge`.
+- Buscar `/manual` fora do início do dia do lote.
+- Rodar `settle` duas vezes na mesma tarefa.
+- Escrever código por heredoc (use a ferramenta de escrita).
+- Usar `spawnSync` em teste com API falsa no mesmo processo.
+- Mascarar a conta cadastrada (não é segredo; a máscara quebrou a comparação).
