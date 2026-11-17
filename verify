@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // verify: the proof (BRIEF.md "Proof"). Exit 0 only when every check of the chosen mode passes.
-//   ./verify            unit tests + must checks M1–M7
+//   ./verify            unit tests + must checks M1–M8 (M8: no secret outside its scope, hop by hop)
 //   ./verify --slice 1  unit tests + slice 1 checks (latest run in logs/)
 //   ./verify --all      must checks + keep checks K1–K2
 //   ./verify --lab [lab/out/<run>]  unit tests + the lab checks of lab/EXPECTED.md (latest finished lab run)

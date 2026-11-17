@@ -50,6 +50,9 @@ before(async () => {
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   base = `http://localhost:${server.address().port}`;
+  // the secret scope (net.mjs scopeOf): the fake stands in for the course API; the payout key only to /payouts
+  process.env.API_BASE = base;
+  process.env.PAYOUTS_URL = `${base}/payouts`;
 });
 after(() => {
   server.close();
@@ -71,7 +74,8 @@ const noSecret = (text, where) => {
 };
 
 test('an echoed secret comes back masked, to the model and in the log', async () => {
-  const r = await tools.http.execute('1', { url: `${base}/echo?t={{TICKET}}`, headers: { Authorization: 'Bearer {{TICKET}}', 'X-Key': '{{PAYOUT_KEY}}' } });
+  // the payout key may go only to /payouts now (scopeOf), so the echo carries the ticket only
+  const r = await tools.http.execute('1', { url: `${base}/echo?t={{TICKET}}`, headers: { Authorization: 'Bearer {{TICKET}}' } });
   const text = r.content[0].text;
   assert.equal(hits.length, 1);
   assert.equal(hits[0].headers.authorization, `Bearer ${FAKE.TICKET}`, 'the real value is sent');

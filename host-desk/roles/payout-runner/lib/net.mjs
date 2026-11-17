@@ -54,7 +54,42 @@ export function config(env = process.env) {
     writeUrls: String(env.WRITE_URLS ?? '').split(',').map((w) => w.trim()).filter(Boolean),
     logDir: env.LOG_DIR ? resolve(env.LOG_DIR) : join(ROOT, 'logs'),
     runId: env.RUN_ID ?? '',
+    // Where each secret may go (check-lane payout-run, 2026-11-17: "A document's request never sends a secret to a new
+    // host"). Fixed here and in run.mjs, never from a manual or a reply: only the human changes it.
+    apiBase: env.API_BASE || 'https://hq.mega.dev/challenges/twenty-payouts',
+    payoutsUrl: env.PAYOUTS_URL || 'https://pay-s04.mega.dev/payouts',
   };
+}
+
+/** The URL prefixes a secret may be sent to, or null for a name with no scope (not a credential). */
+export function scopeOf(name, cfg = config()) {
+  const n = name.replace(/_PREV_\d+$/, '');
+  if (n === 'TICKET' || n === 'ATTEMPT') return [cfg.apiBase];
+  if (n === 'PAYOUT_KEY') return [cfg.payoutsUrl];
+  if (n === 'CUR_TASK' || /^TASK_[A-Z]+_\d+$/.test(n)) return [cfg.apiBase, cfg.payoutsUrl];
+  return null;
+}
+
+function within(url, prefix) {
+  try {
+    const u = new URL(url);
+    const p = new URL(prefix);
+    const base = p.pathname.replace(/\/+$/, '');
+    return u.origin === p.origin && (u.pathname === base || u.pathname.startsWith(`${base}/`) || base === '');
+  } catch {
+    return false;
+  }
+}
+
+/** Why this request may not carry the secrets it holds to this URL, or null. */
+export function scopeRefusal(target, outgoing, vars, cfg = config()) {
+  for (const [k, v] of Object.entries(vars)) {
+    if (typeof v !== 'string' || v.length < 4) continue;
+    const scope = scopeOf(k, cfg);
+    if (!scope || !(outgoing.includes(v) || outgoing.includes(encodeURIComponent(v)))) continue;
+    if (!scope.some((p) => within(target, p))) return `secret {{${k}}} may go only to ${scope.join(' or ')}; this request would send it to ${new URL(target).host}. Nothing was sent`;
+  }
+  return null;
 }
 
 /** Replaces every vars value (raw and URL-encoded) with {{NAME}}. Longest values first. */
@@ -206,7 +241,8 @@ export async function send({ method = 'GET', url, headers = {}, body, caller = '
   }
 
   for (let hop = 0; hop <= MAX_HOPS; hop++) {
-    const why = refusal({ method, url: target, caller }, cfg);
+    // every hop: a redirect never carries a secret past its scope either
+    const why = refusal({ method, url: target, caller }, cfg) ?? scopeRefusal(target, `${target}\n${JSON.stringify(h)}\n${payload ?? ''}`, vars, cfg);
     if (why) {
       log(cfg, { ...base, hop, url: mask(target, vars), refused: why });
       return { ok: false, refused: why, url: mask(target, vars), body: '' };

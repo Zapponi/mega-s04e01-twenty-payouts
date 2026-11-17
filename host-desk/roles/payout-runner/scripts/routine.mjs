@@ -32,10 +32,8 @@ if (batch === 'run' && process.env.ALLOW_RUN !== '1') {
   console.log('The real run is not allowed in this session (ALLOW_RUN is not 1). Stop and tell the human. Nothing was sent.');
   process.exit(1);
 }
-if (batch === 'run' && !events().some((e) => e.event === 'key_checked' && e.ok && e.attempt === st.ATTEMPT_SEEN_AT)) {
-  console.log('The payout key was not checked for this attempt (manual: "Before a run, check the payout key"). Run check-key.mjs first. Nothing was sent.');
-  process.exit(1);
-}
+// No key check: the manual's "check the payout key" sends the key to a host the manual names, a document's request
+// to a new host (check-lane payout-run, real run 3 refused). The request layer now refuses it (net.mjs scopeOf).
 
 const summary = { answered: [], flagged: [], stopped: null };
 function finish(code) {

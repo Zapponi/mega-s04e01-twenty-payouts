@@ -41,7 +41,7 @@ if (process.env.READ_ONLY === '1') {
     process.exit(2);
   }
   role = 'ROLE.md';
-  process.env.ALLOWED_HOSTS = 'hq.mega.dev,pay-s04.mega.dev,verify-s04.mega.dev';
+  process.env.ALLOWED_HOSTS = 'hq.mega.dev,pay-s04.mega.dev'; // no verify-s04: the manual's key check sent the key to a new host (real run 3)
   process.env.MANUAL_URL = MANUAL;
   process.env.MANUAL_ONCE = '1';
   delete process.env.DENY_URLS;

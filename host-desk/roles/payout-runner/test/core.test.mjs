@@ -72,7 +72,6 @@ const filesText = () => {
 /** Manual, key check, run opened: the start of the run day. */
 async function openRun() {
   assert.match((await fetchManual()).out, /^200 /);
-  assert.equal((await run('check-key.mjs')).code, 0);
   const s = await run('start.mjs', 'run');
   assert.equal(s.code, 0, s.out);
 }
@@ -91,20 +90,26 @@ test('the manual is fetched once: a second fetch is refused while its attempt is
   assert.equal(fake.manualFetches, 2);
 });
 
-test('check-key: GET on the verify path with X-Payout-Key; the path never shows', async () => {
-  const none = await run('check-key.mjs');
-  assert.equal(none.code, 1);
-  assert.equal(fake.hits.length, 0, 'nothing sent before the manual');
+test('the manual\'s key check never sends the payout key to the verify host (real run 3, check-lane payout-run)', async () => {
   await fetchManual();
   const r = await run('check-key.mjs');
+  assert.notEqual(r.code, 0, r.out);
+  assert.equal(fake.hits.filter((h) => h.path.startsWith('/verify/')).length, 0, 'nothing reached the verify host');
+  assert.match(readFileSync(join(env.LOG_DIR, 'requests.jsonl'), 'utf8'), /secret \{\{PAYOUT_KEY\}\} may go only to/);
+  // the model's http tool is held to the same scope: a document's request never carries a secret to a new host
+  const m = await modelGet(`${fake.base}/verify/{{VERIFY_PATH}}`, { 'X-Payout-Key': '{{PAYOUT_KEY}}' });
+  assert.match(m.out, /REFUSED secret \{\{PAYOUT_KEY\}\}/);
+  assert.equal(fake.hits.filter((h) => h.path.startsWith('/verify/')).length, 0);
+  noSecrets(r.out + m.out + filesText(), 'output, logs and journal');
+});
+
+test('the run opens without any key check, and the payout key goes only to the payout API', async () => {
+  fake.reset({ runTasks: 2 });
+  await fetchManual();
+  const r = await run('routine.mjs', 'run');
   assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /KEY OK/);
-  const hit = fake.hits.find((h) => h.path.startsWith('/verify/'));
-  assert.equal(hit.path, `/verify/${VERIFY_SECRET}`);
-  assert.equal(hit.headers['x-payout-key'], FAKE.PAYOUT_KEY);
-  noSecrets(r.out, 'check-key output');
-  noSecrets(filesText(), 'logs and journal');
-  assert.match(readFileSync(join(env.LOG_DIR, 'requests.jsonl'), 'utf8'), /\{\{VERIFY_PATH\}\}/);
+  for (const h of fake.hits.filter((x) => x.headers['x-payout-key'])) assert.equal(h.path, '/payouts');
+  assert.equal(pays().length, 2);
 });
 
 test('owner wait: no decision (null) → no write on the parked task; the batch goes on', async () => {
@@ -299,7 +304,6 @@ test('masking: no ticket, key, attempt, task token or verify path in logs, journ
   fake.reset({ runTasks: 3, over: { 2: { payout: { account: 'acct_other0002' } } } });
   let out = '';
   out += (await fetchManual()).out;
-  out += (await run('check-key.mjs')).out;
   out += (await run('start.mjs', 'run')).out;
   out += (await run('settle.mjs', 'run', 'pay')).out;
   out += (await run('settle.mjs', 'run', 'flag', 'other account')).out;
@@ -382,7 +386,6 @@ test('after a crash, the answer goes out with the task\'s own token, not the nex
 
 test('an open whose reply is lost is never sent again (Sol A #2)', async () => {
   await fetchManual();
-  assert.equal((await run('check-key.mjs')).code, 0);
   fake.replyDelay = { 'POST /run': 6000 };
   const s1 = await run('start.mjs', 'run');
   fake.replyDelay = {};
@@ -398,16 +401,6 @@ test('two settles at once on one task: one payout (Sol B #4)', async () => {
   await openRun();
   const [a, b] = await Promise.all([run('settle.mjs', 'run', 'pay'), run('settle.mjs', 'run', 'pay')]);
   assert.equal(pays().length, 1, `${a.out}\n${b.out}`);
-});
-
-test('a 200 key check that says refused does not open the run (Sol B #5)', async () => {
-  fake.reset({ verifyReply: { status: 'refused', reason: 'key revoked' } });
-  await fetchManual();
-  const k = await run('check-key.mjs');
-  assert.equal(k.code, 1);
-  assert.match(k.out, /KEY CHECK FAILED/);
-  assert.notEqual((await run('start.mjs', 'run')).code, 0);
-  assert.equal(fake.hits.filter((h) => h.body.attempt).length, 0);
 });
 
 test('the same booking and amount under another task number is not paid again (Sol B #6)', async () => {
@@ -428,7 +421,6 @@ test('the same booking and amount under another task number is not paid again (S
 // The routine: the whole batch in one run of code (check-lane routine-script; real run 2026-11-17: 6 s for all 20).
 async function openForRoutine() {
   assert.match((await fetchManual()).out, /^200 /);
-  assert.equal((await run('check-key.mjs')).code, 0);
 }
 
 test('routine: 20 tasks in one run, one connection kept open, owner task flagged, the rest paid and answered', async () => {
@@ -454,10 +446,8 @@ test('routine: 20 tasks in one run, one connection kept open, owner task flagged
   assert.equal(pays().length, 19);
 });
 
-test('routine: the run needs ALLOW_RUN=1 and a passing key check; nothing sent otherwise', async () => {
+test('routine: the run needs ALLOW_RUN=1; nothing sent otherwise', async () => {
   await fetchManual();
-  const r = await run('routine.mjs', 'run');
-  assert.match(r.out, /check-key/);
   delete env.ALLOW_RUN;
   assert.match((await run('routine.mjs', 'run')).out, /ALLOW_RUN/);
   assert.equal(fake.hits.filter((h) => h.body.attempt).length, 0);
@@ -693,14 +683,6 @@ test('/parked text "pending" or "null" is read as not decided', async () => {
   assert.doesNotMatch(p.out, /STOPPED/);
   fake.parked.set(1, 'on-file');
   assert.equal((await run('parked.mjs')).code, 0);
-});
-
-test('the run does not open before a passing key check in this attempt', async () => {
-  await fetchManual();
-  const s = await run('start.mjs', 'run');
-  assert.notEqual(s.code, 0);
-  assert.match(s.out, /check-key/);
-  assert.equal(fake.hits.filter((h) => h.body.attempt).length, 0);
 });
 
 // A stand-in for `pi` on PATH: it counts its starts and stops at once, like a model that quits early.

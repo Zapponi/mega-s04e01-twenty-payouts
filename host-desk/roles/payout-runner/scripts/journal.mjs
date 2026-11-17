@@ -25,12 +25,8 @@ if (!open) {
   console.log(lines.join('\n'));
   process.exit(0);
 }
-const key = ev.filter((e) => e.event === 'key_checked').at(-1);
-lines.push(`key check: ${key ? (key.ok ? `ok (${key.time})` : `FAILED (http ${key.http ?? '-'}, ${key.why ?? ''})`) : 'not done in this attempt'}`);
-
 let next = open ? null : 'fetch the manual (GET /manual, Bearer {{TICKET}}), once';
 let stopNote = null;
-if (!next && !key?.ok) next = 'check-key.mjs';
 for (const batch of ['practice', 'run']) {
   const opened = ev.some((e) => e.event === 'opened' && e.batch === batch);
   const last = new Map();
