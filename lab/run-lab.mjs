@@ -3,7 +3,7 @@
 // lab/out/<stamp>/ for ./verify --lab.
 //   node lab/run-lab.mjs --agent model   (paid: run.mjs MODE=lab with MODEL, e.g. openrouter/anthropic/claude-haiku-5.5)
 //   node lab/run-lab.mjs --agent dry     (free: lab/dry-agent.mjs, no model)
-// Options: --decide-ms <ms> (default 300000: the owner decides 5 min after a flag), --kill-after <n> (default 7, 0 = no
+// Options: --decide-ms <ms> (default 300000: the owner decides 5 min after a flag), --kill-after <n> (default 0 = no kill; the run is one routine process now, so a kill ends it: see lab/EXPECTED.md;
 // kill), --timeout-ms <ms> (default 1500000).
 import { spawn } from 'node:child_process';
 import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -15,7 +15,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const arg = (k, d) => (process.argv.includes(k) ? process.argv[process.argv.indexOf(k) + 1] : d);
 const agent = arg('--agent', 'dry');
 const decideMs = Number(arg('--decide-ms', 300_000));
-const killAfter = Number(arg('--kill-after', 7));
+const killAfter = Number(arg('--kill-after', 0));
 const timeoutMs = Number(arg('--timeout-ms', 1_500_000));
 if (!['dry', 'model'].includes(agent)) {
   console.error('--agent dry | model');

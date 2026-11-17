@@ -144,8 +144,8 @@ let receipt;
 try {
   receipt = JSON.parse(p.body)?.receipt;
 } catch {}
+refused(p, 'payout'); // a refusal stops even when a receipt came with it (Sol review D #2)
 if (!(p.status >= 200 && p.status < 300) || typeof receipt !== 'string' || !receipt) {
-  refused(p, 'payout');
   if (p.refused) {
     journal({ key, status: 'not_sent', step: 'payout', why: p.refused });
     release(key, 'act');

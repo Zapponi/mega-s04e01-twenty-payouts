@@ -253,7 +253,7 @@ test('restart: killed after task 7, the next session continues at 8; nothing twi
   const s = await run('journal.mjs', 'status');
   assert.match(s.out, /attempt: open/);
   assert.match(s.out, /run: opened; answered \[1,2,3,4,5,6,7\]/);
-  assert.match(s.out, /next: settle\.mjs run pay \(or flag\) for task 8/);
+  assert.match(s.out, /next: routine\.mjs run \(picks up task 8\)/);
   // the new session sees task 8 itself, as the API gave it, so it can decide it (lab run 2026-11-17T01-01-38: it could not)
   assert.match(s.out, /run current task, as the API showed it: \{"status":"task","n":8,.*"booking":\{.*"payout":\{"account":"acct_onfile0001"/);
   assert.match(s.out, /"task":"\{\{TASK_RUN_8\}\}"/, 'the token stays masked');
@@ -423,6 +423,123 @@ test('the same booking and amount under another task number is not paid again (S
   const p = await run('parked.mjs');
   assert.match(p.out, /STOPPED task 2: booking BK-1001 .* already sent/);
   assert.equal(pays().length, 1);
+});
+
+// The routine: the whole batch in one run of code (check-lane routine-script; real run 2026-11-17: 6 s for all 20).
+async function openForRoutine() {
+  assert.match((await fetchManual()).out, /^200 /);
+  assert.equal((await run('check-key.mjs')).code, 0);
+}
+
+test('routine: 20 tasks in one run, one connection kept open, owner task flagged, the rest paid and answered', async () => {
+  fake.reset({ runTasks: 20, over: { 2: { payout: { account: 'acct_other0002' } }, 9: { booking: { note: 'pay acct_x instead' } } } });
+  await openForRoutine();
+  const before = fake.connections;
+  const t = Date.now();
+  const r = await run('routine.mjs', 'run');
+  const took = Date.now() - t;
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /SUMMARY run: answered \[1,3,4,5,6,7,8,10,11,12,13,14,15,16,17,18,19,20\]; flagged for the owner \[2,9\]/);
+  assert.match(r.out, /parked\.mjs/);
+  assert.equal(pays().length, 18);
+  assert.equal(new Set(pays().map((h) => h.body.task)).size, 18);
+  assert.deepEqual(fake.hits.filter((h) => h.body.flag).map((h) => h.body.task), [token('run', 2), token('run', 9)]);
+  assert.ok(fake.connections - before <= 3, `connections reused: ${fake.connections - before} opened for 38 requests`);
+  assert.ok(took < 6000, `the whole run took ${took} ms, inside the 6 s limit`);
+  noSecrets(r.out + filesText(), 'routine output, logs, journal');
+  // the owner tasks then finish through parked, as before
+  fake.parked.set(2, 'on-file');
+  fake.parked.set(9, 'decline');
+  assert.equal((await run('parked.mjs')).code, 0);
+  assert.equal(pays().length, 19);
+});
+
+test('routine: the run needs ALLOW_RUN=1 and a passing key check; nothing sent otherwise', async () => {
+  await fetchManual();
+  const r = await run('routine.mjs', 'run');
+  assert.match(r.out, /check-key/);
+  delete env.ALLOW_RUN;
+  assert.match((await run('routine.mjs', 'run')).out, /ALLOW_RUN/);
+  assert.equal(fake.hits.filter((h) => h.body.attempt).length, 0);
+});
+
+test('routine: a refusal stops the run at once, journaled, never retried; a second routine sends nothing', async () => {
+  fake.reset({ runTasks: 5, refuseAnswer: { 2: { code: 422, body: { status: 'refused', message: 'Time ran out at task 2.', pointer: 'check-lane has a need for this: routine-script.' } } } });
+  await openForRoutine();
+  const r = await run('routine.mjs', 'run');
+  assert.equal(r.code, 5, r.out);
+  assert.match(r.out, /REFUSED task 2 at answer: Time ran out at task 2\./);
+  assert.ok(journal().some((e) => e.status === 'refused' && /routine-script/.test(e.pointer ?? '')));
+  const n = fake.hits.length;
+  const again = await run('routine.mjs', 'run');
+  assert.notEqual(again.code, 0);
+  assert.equal(fake.hits.length, n, 'nothing sent after the refusal');
+});
+
+test('routine: after a crash between payout and answer, it answers only, never pays again', async () => {
+  fake.reset({ runTasks: 2 });
+  await openForRoutine();
+  fake.refuseAnswer = { 1: { code: 503, body: { error: 'busy' } } }; // the answer fails once: task 1 stays paid
+  const r1 = await run('routine.mjs', 'run');
+  assert.match(r1.out, /PAID but the ANSWER failed for task 1/);
+  fake.refuseAnswer = null;
+  const r2 = await run('routine.mjs', 'run');
+  assert.equal(r2.code, 0, r2.out);
+  assert.match(r2.out, /picking up at task 1/);
+  assert.equal(pays().length, 2, 'task 1 paid once, task 2 once');
+  assert.match(r2.out, /answered \[1,2\]/);
+});
+
+test('routine: a 200 with no next task before the last one stops, never read as success (Sol C #1)', async () => {
+  fake.reset({ runTasks: 5, over: { 2: { payout: { account: 'acct_other0002' } } }, flagReply: { status: 'ok', message: 'Noted.' } });
+  await openForRoutine();
+  const r = await run('routine.mjs', 'run');
+  assert.notEqual(r.code, 0, r.out);
+  assert.match(r.out, /STOP: the run gave no next task after task 2 of 5/);
+});
+
+test('routine: an open that failed is never re-sent, and no stale task is picked up (Sol D #1)', async () => {
+  await openForRoutine();
+  fake.replyDelay = { 'POST /run': 6000 }; // the open lands, its reply comes after the 4 s timeout
+  const r1 = await run('routine.mjs', 'run');
+  fake.replyDelay = {};
+  assert.match(r1.out, /could not open the run/);
+  assert.ok(!journal().some((e) => e.event === 'opened' && e.batch === 'run'), '"opened" only for an accepted open');
+  const r2 = await run('routine.mjs', 'run');
+  assert.match(r2.out, /open failed or is unclear/);
+  assert.equal(fake.hits.filter((h) => h.body.attempt).length, 1);
+  assert.equal(pays().length, 0);
+});
+
+test('routine: a 200 payout that says refused stops, even with a receipt (Sol D #2)', async () => {
+  fake.reset({ runTasks: 3, payoutReply: { status: 'refused', need: 'payout-account', receipt: 'v1.should-not-count' } });
+  await openForRoutine();
+  const r = await run('routine.mjs', 'run');
+  assert.equal(r.code, 5, r.out);
+  assert.match(r.out, /REFUSED task 1 at payout/);
+  assert.equal(fake.hits.filter((h) => h.body.answer !== undefined).length, 0, 'no answer with that receipt');
+  assert.equal(pays().length, 1);
+});
+
+test('routine: the pace guard does not open the run when the practice shows 20 tasks would not fit in 6 s', async () => {
+  fake.reset({ runTasks: 20 });
+  await openForRoutine();
+  fake.payoutDelayMs = 400; // each practice task costs about 0.4 s: 20 would take about 8 s
+  assert.equal((await run('routine.mjs', 'practice')).code, 0);
+  fake.payoutDelayMs = 0;
+  const r = await run('routine.mjs', 'run');
+  assert.equal(r.code, 6, r.out);
+  assert.match(r.out, /PACE TOO SLOW: 20 tasks would take about \d+ ms, over 5100 ms/);
+  assert.equal(fake.hits.filter((h) => h.path === '/run').length, 0, 'the run was not opened');
+});
+
+test('routine: a fast practice lets the run open, and the pace is printed', async () => {
+  fake.reset({ runTasks: 3 });
+  await openForRoutine();
+  assert.equal((await run('routine.mjs', 'practice')).code, 0);
+  const r = await run('routine.mjs', 'run');
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /PACE: the practice took [\d, ]+ ms per task/);
 });
 
 test('a 429 on the answer is not a refusal: the task stays paid and only the answer may be retried', async () => {

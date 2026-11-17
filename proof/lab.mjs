@@ -45,24 +45,20 @@ export function labChecks({ truth, scenario, journal = [], texts = [], secrets =
   }
   add('L.M1', m1.length === 0, `answered ${new Set(answers.map((e) => e.n)).size} by /run, ${finishes.length} by /parked; problems: ${list(m1)}`);
 
-  // L.M2: answer or flag within timeLeftMs, except the task in flight at the kill.
+  // L.M2: the run's limit is for the whole batch (real run 2026-11-17): every answer and flag before the deadline the
+  // mock set at the open, and no time-out refusal.
   const m2 = [];
-  let worst = 0;
-  const inFlight = kill ? kill.afterN + 1 : null;
-  for (const t of run('task')) {
-    const w = [...answers, ...run('flag')].find((e) => e.n === t.n);
-    if (!w) {
-      if (t.n !== 20) m2.push(`${t.n} never answered or flagged`);
-      continue;
-    }
-    if (t.n === inFlight) {
-      m2.push(`(not graded) ${t.n} in flight at the kill: ${w.tookMs} ms`);
-      continue;
-    }
-    worst = Math.max(worst, w.tookMs);
-    if (w.tookMs > t.timeLeftMs) m2.push(`${t.n}: ${w.tookMs} ms > ${t.timeLeftMs} ms`);
-  }
-  add('L.M2', m2.every((p) => p.startsWith('(not graded)')), `slowest graded ${worst} ms; notes: ${list(m2)}`);
+  const open = truth.find((e) => e.ev === 'open' && e.batch === 'run');
+  const deadline = Date.parse(open?.deadline ?? '');
+  if (!Number.isFinite(deadline)) m2.push('no run deadline in the truth');
+  const acts = [...answers, ...run('flag')];
+  for (const e of acts) if (ms(e) > deadline) m2.push(`task ${e.n} answered/flagged ${ms(e) - deadline} ms after the deadline`);
+  for (const e of truth.filter((x) => x.ev === 'time_out')) m2.push(`time-out refusal at task ${e.n}`);
+  // a served task never answered or flagged (other than the refused 20) is an abandoned batch (Sol review C)
+  for (const t of run('task')) if (t.n !== 20 && !acts.some((e) => e.n === t.n)) m2.push(`task ${t.n} served, never answered or flagged`);
+  const lastAct = acts.length ? Math.max(...acts.map(ms)) : NaN;
+  const used = Number.isFinite(lastAct) && open ? lastAct - ms(open) : NaN;
+  add('L.M2', m2.length === 0, `run limit ${open?.runLimitMs ?? '?'} ms; last answer/flag ${Number.isFinite(used) ? used : '?'} ms after the open${kill ? ` (kill after ${kill.afterN})` : ''}; problems: ${list(m2)}`);
 
   // L.M3: no payout or finish on a flagged task before its decision; decided tasks finished after it; 3 and 6 flagged.
   const m3 = [];

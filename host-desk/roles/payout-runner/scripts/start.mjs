@@ -35,7 +35,7 @@ const r = await send(
   { method: 'POST', url: batchUrl(batch), body: { attempt: '{{ATTEMPT}}' }, signal: AbortSignal.timeout(Number(process.env.SETTLE_TIMEOUT_MS || 4000)) },
   { capture: captureTask(batch), keep: (text) => saveCurrent(batch, text) },
 );
-journal({ event: 'opened', batch, attempt: st.ATTEMPT_SEEN_AT, http: r.status, unclear: r.status ? undefined : (r.refused ?? r.error) });
+journal(r.status >= 200 && r.status < 300 && !refusalOf(r) ? { event: 'opened', batch, attempt: st.ATTEMPT_SEEN_AT, http: r.status } : { event: 'open_failed', batch, attempt: st.ATTEMPT_SEEN_AT, http: r.status, why: r.refused ?? r.error }); // 'opened' only for an accepted open (Sol review D #1)
 const ref = r.status ? refusalOf(r) : null;
 if (ref) {
   journal({ event: 'open_refused', batch, need: ref.need, why: ref.why, http: r.status });

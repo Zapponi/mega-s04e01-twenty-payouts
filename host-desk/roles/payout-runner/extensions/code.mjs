@@ -37,7 +37,7 @@ export function inside(name, root = SCRIPTS, path = nodePath) {
 
 // Only the day's scripts. Others in scripts/ (open-practice.mjs, § 2) talk to the real host with their own
 // settings and are run by a person, never by the model (Sol review B #1).
-export const ALLOWED = new Set(['journal.mjs', 'check-key.mjs', 'start.mjs', 'settle.mjs', 'parked.mjs']);
+export const ALLOWED = new Set(['journal.mjs', 'check-key.mjs', 'routine.mjs', 'start.mjs', 'settle.mjs', 'parked.mjs']);
 
 /** The script to run, or null: one of ALLOWED, inside scripts/, there, and no link that leads out of scripts/. */
 function script(name) {
