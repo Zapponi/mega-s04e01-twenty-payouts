@@ -7,3 +7,15 @@ journal/
 host-desk/roles/*/scripts/state/
 lab/out/
 node_modules/
+
+# agent-kit: local secrets and agent caches
+.env
+.env.*
+**/ticket.txt
+**/receipts.json
+mcp-needs-auth-cache.json
+.claude/settings.local.json
+.claude/name-denylist.txt
+.claude/one-thread
+loop/
+.claude/skills

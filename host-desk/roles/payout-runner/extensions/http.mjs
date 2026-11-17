@@ -1,44 +1,36 @@
-// http: one HTTP request. {{NAME}} references from vars are filled in the url, headers and body when the
-// request is sent, so the model works with the reference only. Redirects are followed.
-import { fillVars, loadVars } from './vars.mjs';
+// http: one HTTP request, through the request layer (lib/net.mjs, plan.md § 0). {{NAME}} references from vars are
+// filled in when the request is sent, so the model works with the reference only. The model's http sends GET only;
+// writes to the course API go through the checked scripts. Every reply comes back masked.
+import { send } from '../lib/net.mjs';
 
 const MAX_BODY = 20_000;
-const hide = (u, vars) => Object.entries(vars).reduce((s, [k, v]) => (v ? s.split(v).join(`{{${k}}}`).split(encodeURIComponent(v)).join(`{{${k}}}`) : s), u);
 
 export default function (pi) {
   pi.registerTool({
     name: 'http',
     label: 'http',
-    description: 'Sends one HTTP request and returns the status, the final URL and the response body. {{NAME}} references from vars are filled in when it is sent.',
+    description: 'Sends one GET request and returns the status, the final URL and the response body. {{NAME}} references from vars are filled in when it is sent. Writes (POST, PUT, PATCH, DELETE) are refused here: they go through the scripts in scripts/.',
     parameters: {
       type: 'object',
       additionalProperties: false,
       required: ['url'],
       properties: {
-        method: { type: 'string', description: 'GET (default), POST, PUT, PATCH or DELETE.' },
+        method: { type: 'string', description: 'GET (default). Other methods are refused.' },
         url: { type: 'string' },
         headers: { type: 'object', additionalProperties: { type: 'string' } },
         body: { description: 'A string, or a JSON value (sent as JSON).' },
       },
     },
     async execute(_id, p, signal) {
-      const vars = loadVars();
-      const headers = Object.fromEntries(Object.entries(p.headers ?? {}).map(([k, v]) => [k, fillVars(v, vars)]));
-      let body;
-      if (p.body !== undefined && p.body !== null) {
-        body = fillVars(typeof p.body === 'string' ? p.body : JSON.stringify(p.body), vars);
-        if (typeof p.body !== 'string' && !Object.keys(headers).some((h) => h.toLowerCase() === 'content-type')) headers['content-type'] = 'application/json';
+      const r = await send({ method: p.method ?? 'GET', url: p.url, headers: p.headers, body: p.body, caller: 'model', signal });
+      if (r.refused) {
+        return { content: [{ type: 'text', text: `refused, not sent: ${r.refused}` }], details: { failed: true, refused: r.refused } };
       }
-      try {
-        const res = await fetch(fillVars(p.url, vars), { method: (p.method ?? 'GET').toUpperCase(), headers, body, signal });
-        const text = await res.text();
-        // The URL as the model wrote it, references and not their values; after a redirect, each value shown as its name.
-        const url = res.redirected ? hide(res.url, vars) : p.url;
-        const out = `${res.status} ${url}\n${text.length > MAX_BODY ? `${text.slice(0, MAX_BODY)}\n…(cut)` : text}`;
-        return { content: [{ type: 'text', text: out }], details: { status: res.status, url } };
-      } catch (e) {
-        return { content: [{ type: 'text', text: `request failed: ${e?.cause?.message ?? e?.message ?? e}` }], details: { failed: true } };
+      if (r.error) {
+        return { content: [{ type: 'text', text: `request failed: ${r.error}` }], details: { failed: true } };
       }
+      const out = `${r.status} ${r.url}\n${r.body.length > MAX_BODY ? `${r.body.slice(0, MAX_BODY)}\n…(cut at ${MAX_BODY} of ${r.body.length} characters)` : r.body}`;
+      return { content: [{ type: 'text', text: out }], details: { status: r.status, url: r.url } };
     },
   });
 }

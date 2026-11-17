@@ -9,14 +9,22 @@ import { fileURLToPath } from 'node:url';
 // host-desk/roles/<role>/extensions/vars.mjs → host-desk/
 const DESK = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 
-/** name → value, from vars.json. Missing file or bad JSON → no vars. */
-export function loadVars() {
+// Values the request layer captures at run time (the attempt token from /manual), kept out of git
+// (scripts/state/ is git-ignored) and treated like any other var: filled in by reference, masked everywhere.
+export const STATE_FILE = () => process.env.STATE_FILE || join(DESK, 'roles/payout-runner/scripts/state/vars.json');
+
+const readVars = (file) => {
   try {
-    const raw = JSON.parse(readFileSync(join(DESK, 'vars.json'), 'utf8'));
+    const raw = JSON.parse(readFileSync(file, 'utf8'));
     return Object.fromEntries(Object.entries(raw).filter(([k, v]) => /^[A-Z][A-Z0-9_]*$/.test(k) && typeof v === 'string'));
   } catch {
     return {};
   }
+};
+
+/** name → value, from vars.json (or VARS_FILE, for tests) plus the run-time state file. Missing file or bad JSON → no vars. */
+export function loadVars() {
+  return { ...readVars(STATE_FILE()), ...readVars(process.env.VARS_FILE || join(DESK, 'vars.json')) };
 }
 
 /** Replaces every {{NAME}} with its value; an unknown name stays as written. */

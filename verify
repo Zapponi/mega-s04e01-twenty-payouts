@@ -1,0 +1,177 @@
+#!/usr/bin/env node
+// verify: the proof (BRIEF.md "Proof"). Exit 0 only when every check of the chosen mode passes.
+//   ./verify            unit tests + must checks M1–M7
+//   ./verify --slice 1  unit tests + slice 1 checks (latest run in logs/)
+//   ./verify --all      must checks + keep checks K1–K2
+//   ./verify --lab [lab/out/<run>]  unit tests + the lab checks of lab/EXPECTED.md (latest finished lab run)
+// It reads the request log, the run log, the saved manual and (later) the API state; never the agent's report on
+// itself. It reads vars.json only to search for leaked values, and never prints a value.
+import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { checks } from './proof/checks.mjs';
+
+const ROOT = dirname(fileURLToPath(import.meta.url));
+const LOGS = join(ROOT, 'logs');
+const DEFAULT_MANUAL_URL = 'https://hq.mega.dev/challenges/twenty-payouts/api';
+const args = process.argv.slice(2);
+const slice = args.includes('--slice') ? args[args.indexOf('--slice') + 1] : null;
+const all = args.includes('--all');
+
+const results = [];
+const check = (id, ok, detail) => results.push({ id, ok, detail });
+
+function unitTests() {
+  const dir = join(ROOT, 'host-desk/roles/payout-runner/test');
+  const files = readdirSync(dir).filter((f) => f.endsWith('.test.mjs')).map((f) => join(dir, f));
+  const r = spawnSync(process.execPath, ['--test', ...files], { encoding: 'utf8' });
+  const pass = /# pass (\d+)/.exec(r.stdout)?.[1] ?? '0';
+  const fail = /# fail (\d+)/.exec(r.stdout)?.[1] ?? '?';
+  const failing = [...r.stdout.matchAll(/^not ok \d+ - (.+)$/gm)].map((m) => m[1]);
+  check('unit', r.status === 0, `unit tests: ${pass} pass, ${fail} fail (node --test ${relative(ROOT, dir)}/)${failing.length ? `; failing: ${failing.join(' | ')}` : ''}`);
+}
+
+const STATE = join(ROOT, 'host-desk/roles/payout-runner/scripts/state/vars.json');
+function secretValues() {
+  let out;
+  try {
+    const raw = JSON.parse(readFileSync(join(ROOT, 'host-desk/vars.json'), 'utf8'));
+    out = Object.entries(raw).filter(([, v]) => typeof v === 'string' && v.length >= 4 && !v.startsWith('<'));
+  } catch {
+    return null;
+  }
+  try {
+    const st = JSON.parse(readFileSync(STATE, 'utf8'));
+    out.push(...Object.entries(st).filter(([k, v]) => /^(ATTEMPT|VERIFY_PATH|CUR_TASK|TASK_[A-Z]+_\d+)(_PREV_\d+)?$/.test(k) && typeof v === 'string' && v.length >= 4));
+  } catch {}
+  return out;
+}
+
+function walk(dir, out = []) {
+  if (!existsSync(dir)) return out;
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) walk(p, out);
+    else if (e.isFile()) out.push(p);
+  }
+  return out;
+}
+
+// M5: no vars value in logs/, journal/, the repo tree (tracked + untracked, not ignored) or the run output.
+function m5() {
+  const vals = secretValues();
+  if (!vals || vals.length === 0) return check('M5', false, 'cannot read the secret values from host-desk/vars.json to search for them');
+  const git = spawnSync('git', ['ls-files', '-co', '--exclude-standard', '-z'], { cwd: ROOT, encoding: 'utf8' });
+  if (git.status !== 0) return check('M5', false, 'git ls-files failed; cannot list the repo tree');
+  const files = new Set([...git.stdout.split('\0').filter(Boolean).map((f) => join(ROOT, f)), ...walk(LOGS), ...walk(join(ROOT, 'journal'))]);
+  files.delete(join(ROOT, 'host-desk/vars.json'));
+  files.delete(STATE);
+  const hits = [];
+  for (const f of files) {
+    let text;
+    try {
+      text = readFileSync(f, 'utf8');
+    } catch {
+      continue;
+    }
+    for (const [name, v] of vals) if (text.includes(v) || text.includes(encodeURIComponent(v))) hits.push(`${relative(ROOT, f)} holds {{${name}}}`);
+  }
+  check('M5', hits.length === 0, hits.length ? hits.join('; ') : `no secret value in ${files.size} files (repo tree, logs/, journal/)`);
+}
+
+function readLog() {
+  const f = join(LOGS, 'requests.jsonl');
+  if (!existsSync(f)) return [];
+  return readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+}
+
+const sameUrl = (a, b) => {
+  try {
+    const x = new URL(a);
+    const y = new URL(b);
+    return x.origin === y.origin && x.pathname.replace(/\/+$/, '') === y.pathname.replace(/\/+$/, '') && x.search === y.search;
+  } catch {
+    return false;
+  }
+};
+
+function slice1() {
+  const runs = existsSync(LOGS) ? readdirSync(LOGS).filter((f) => /^run-.+\.log$/.test(f)).sort() : [];
+  if (runs.length === 0) return check('slice1', false, 'no run log in logs/: run the agent with READ_ONLY=1 first');
+  const runFile = runs.at(-1);
+  const runId = runFile.slice(4, -4);
+  const started = statSync(join(LOGS, runFile)).birthtimeMs || statSync(join(LOGS, runFile)).ctimeMs;
+  const header = readFileSync(join(LOGS, runFile), 'utf8').split('\n')[0];
+  const MANUAL_URL = / · manual (\S+)/.exec(header)?.[1] ?? DEFAULT_MANUAL_URL;
+  const recs = readLog().filter((r) => r.run === runId);
+  const sent = recs.filter((r) => !r.refused);
+  const refused = recs.filter((r) => r.refused);
+  check('S1.get200', sent.some((r) => r.method === 'GET' && r.status === 200 && sameUrl(r.url, MANUAL_URL)), `run ${runId} (${MANUAL_URL}): ${sent.length} sent, statuses ${sent.map((r) => r.status ?? r.error).join(', ') || 'none'}`);
+  const writes = sent.filter((r) => r.method !== 'GET');
+  check('S1.onlyGET', writes.length === 0, writes.length ? `${writes.length} non-GET sent: ${writes.map((r) => r.method).join(', ')}` : 'no method other than GET was sent');
+  const others = sent.filter((r) => !sameUrl(r.url, MANUAL_URL));
+  check('S1.onlyManual', others.length === 0, others.length ? `other URLs sent: ${others.map((r) => r.url).join(', ')}` : 'only the manual URL was requested');
+  const mdir = join(LOGS, 'manual');
+  const saved = existsSync(mdir) ? readdirSync(mdir).map((f) => join(mdir, f)).filter((f) => statSync(f).mtimeMs >= started - 1000 && statSync(f).size > 100) : [];
+  check('S1.manualSaved', saved.length > 0, saved.length ? `manual saved: ${saved.map((f) => relative(ROOT, f)).join(', ')}` : 'no manual saved under logs/manual/ for this run');
+  const out = readFileSync(join(LOGS, runFile), 'utf8');
+  check('S1.summary', /Endpoints/i.test(out) && /Time limit/i.test(out), 'run output holds the summary headings (Endpoints, Time limit)');
+  if (refused.length) console.log(`note: ${refused.length} request(s) refused by the request layer in this run: ${refused.map((r) => `${r.method} ${r.url} (${r.refused})`).join('; ')}`);
+}
+
+const readJsonl = (f) => (existsSync(f) ? readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+
+// M1–M4, M6, M7 (proof/checks.mjs): the course's replies in logs/requests.jsonl from the last opened run on, the
+// journal, the manual saved for that attempt, and logs/check-lane.jsonl (one { need, time, result } line per
+// check-lane call the harness made).
+function mustChecks() {
+  const records = readLog();
+  const runOpen = records.filter((r) => r.method === 'POST' && /\/run\/?$/.test(new URL(r.url, 'http://x').pathname) && r.status >= 200 && r.status < 300 && /"attempt"/.test(r.reqBody ?? '')).at(-1);
+  const mdir = join(LOGS, 'manual');
+  const manuals = existsSync(mdir) ? readdirSync(mdir).filter((f) => /^manual-.+\.txt$/.test(f)).sort() : [];
+  const stamp = runOpen ? runOpen.time.replace(/[:.]/g, '-') : '';
+  const manualFile = manuals.filter((f) => !runOpen || f.slice(7, -4) <= stamp).at(-1);
+  const manualText = manualFile ? readFileSync(join(mdir, manualFile), 'utf8') : '';
+  return checks({ records, journal: readJsonl(join(ROOT, 'journal/journal.jsonl')), manualText, checkLane: readJsonl(join(LOGS, 'check-lane.jsonl')) });
+}
+
+// --lab [dir]: the lab checks (proof/lab.mjs, lab/EXPECTED.md) on one lab run, the latest under lab/out/ by default.
+async function labRun() {
+  const outDir = join(ROOT, 'lab/out');
+  const given = args[args.indexOf('--lab') + 1];
+  const runs = existsSync(outDir) ? readdirSync(outDir).filter((d) => existsSync(join(outDir, d, 'truth.jsonl')) && existsSync(join(outDir, d, 'done.json'))).sort() : [];
+  const dir = given && !given.startsWith('--') ? join(ROOT, given) : runs.length ? join(outDir, runs.at(-1)) : null;
+  if (!dir || !existsSync(join(dir, 'truth.jsonl'))) return check('lab', false, 'no finished lab run under lab/out/: run node lab/run-lab.mjs first');
+  const { labChecks } = await import('./proof/lab.mjs');
+  const { scenario, LAB_VARS } = await import('./lab/mock-api.mjs');
+  const texts = [...walk(join(dir, 'logs')), ...walk(join(dir, 'journal')), ...walk(join(dir, 'agent'))].map((f) => ({ name: relative(ROOT, f), text: readFileSync(f, 'utf8') }));
+  let st = {};
+  try {
+    st = JSON.parse(readFileSync(join(dir, 'state/vars.json'), 'utf8'));
+  } catch {}
+  const secrets = [...Object.values(LAB_VARS), ...Object.entries(st).filter(([k]) => /^(ATTEMPT|VERIFY_PATH|CUR_TASK|TASK_[A-Z]+_\d+)(_PREV_\d+)?$/.test(k)).map(([, v]) => v)];
+  let kill = null;
+  try {
+    kill = JSON.parse(readFileSync(join(dir, 'kill.json'), 'utf8'));
+  } catch {}
+  console.log(`lab run: ${relative(ROOT, dir)}`);
+  for (const r of labChecks({ truth: readJsonl(join(dir, 'truth.jsonl')), scenario: scenario(), journal: readJsonl(join(dir, 'journal/journal.jsonl')), texts, secrets, kill })) check(r.id, r.ok, r.detail);
+}
+
+unitTests();
+if (args.includes('--lab')) {
+  await labRun();
+} else if (slice === '1') {
+  slice1();
+  m5();
+} else {
+  for (const r of mustChecks()) check(r.id, r.ok, r.detail);
+  m5();
+  if (all) for (const id of ['K1', 'K2']) check(id, false, 'not built yet');
+}
+
+for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'} ${r.id}: ${r.detail}`);
+const failed = results.filter((r) => !r.ok).length;
+console.log(failed ? `\n${failed} check(s) failed.` : '\nAll checks passed.');
+process.exit(failed ? 1 : 0);
