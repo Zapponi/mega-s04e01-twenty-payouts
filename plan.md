@@ -97,6 +97,23 @@ Checks: none directly; feeds § 2–§ 5.
 
 Checks: M5 (masking of new tokens).
 
+## Status after § 2 (2026-11-17 00:06 UTC, KEEP.md)
+
+- **§ 2 is done.** The tasks come one at a time, each with `timeLeftMs: 8000`, so the limit is per task.
+- **The task shape is structured:** booking fields plus `payout.account`.
+- **Hybrid architecture,** approved 2026-11-16 ("1 - sim"):
+  - the agent reads each task and decides;
+  - `scripts/settle.mjs` checks, pays once and answers in under 0.5 s.
+- **Measured:** the agent took 2.2–2.9 s per task, inside 8 s, and the practice was 3/3 answered.
+- **Built and tested** (26 tests): `lib/batch.mjs`, `lib/flow.mjs`, `start.mjs`, `settle.mjs` (pay, flag, answer) and `ROLE.practice.md`.
+- **Still open for § 3:**
+  - `parked.mjs`;
+  - `check-key.mjs`;
+  - `ROLE.md` for the run: one manual fetch, check-key, start run, the loop, flag, parked, summary;
+  - `ALLOW_RUN` wiring in `run.mjs`;
+  - verify M1–M7.
+- The practice role is the base for the run role.
+
 ## § 3 · Agent core (scripts + role), tested without the model
 
 Every write goes through `lib/net.mjs` with `caller: script` and a path allowlist per script. The model's `http` stays GET-only.
