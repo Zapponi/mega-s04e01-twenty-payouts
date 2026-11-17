@@ -19,7 +19,7 @@ const MAX_OUT = 20_000;
 const BASICS = /^(PATH|PATHEXT|SYSTEMROOT|SYSTEMDRIVE|WINDIR|COMSPEC|TEMP|TMP|TMPDIR|HOME|HOMEDRIVE|HOMEPATH|USERPROFILE|APPDATA|LOCALAPPDATA|PROGRAMDATA|USER|USERNAME|LOGNAME|SHELL|TERM|LANG|LC_[A-Z]+|TZ|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE|SSL_CERT_DIR|HTTPS?_PROXY|NO_PROXY|NODE_USE_ENV_PROXY|GIT_(AUTHOR|COMMITTER)_(NAME|EMAIL))$/i;
 const basics = () => Object.fromEntries(Object.entries(process.env).filter(([k]) => BASICS.test(k)));
 // The request layer's settings (plan.md § 0) reach every script, so a script's requests pass the same checks.
-const NET = /^(READ_ONLY|ALLOWED_HOSTS|MANUAL_URL|LOG_DIR|RUN_ID|VARS_FILE)$/;
+const NET = /^(READ_ONLY|ALLOWED_HOSTS|MANUAL_URL|DENY_URLS|LOG_DIR|RUN_ID|VARS_FILE|STATE_FILE|JOURNAL_DIR|ALLOW_RUN)$/;
 const net = () => Object.fromEntries(Object.entries(process.env).filter(([k]) => NET.test(k)));
 
 /**

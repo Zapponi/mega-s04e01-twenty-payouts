@@ -192,6 +192,14 @@ test('the attempt token from the manual is captured, masked, and usable as {{ATT
   assert.ok(!files.includes('att_FAKE_'), 'a saved manual holds an attempt token');
 });
 
+test('a URL in DENY_URLS is refused even as a GET (a manual fetch opens a new attempt)', async () => {
+  process.env.DENY_URLS = `${base}/manual`;
+  const r = await tools.http.execute('1', { url: `${base}/manual` });
+  delete process.env.DENY_URLS;
+  assert.match(r.content[0].text, /^refused, not sent/);
+  assert.equal(hits.length, 0);
+});
+
 test('a script write goes out only to a URL in WRITE_URLS', async () => {
   delete process.env.WRITE_URLS;
   const r = await send({ method: 'POST', url: `${base}/practice`, body: { a: 1 } });

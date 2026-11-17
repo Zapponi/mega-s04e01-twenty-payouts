@@ -25,6 +25,7 @@ export function config(env = process.env) {
     readOnly: env.READ_ONLY === '1',
     manualUrl: env.MANUAL_URL ?? '',
     // Writes (any method but GET) are allowed only to these exact URLs, set per run or per script.
+    denyUrls: String(env.DENY_URLS ?? '').split(',').map((w) => w.trim()).filter(Boolean),
     writeUrls: String(env.WRITE_URLS ?? '').split(',').map((w) => w.trim()).filter(Boolean),
     logDir: env.LOG_DIR ? resolve(env.LOG_DIR) : join(ROOT, 'logs'),
     runId: env.RUN_ID ?? '',
@@ -34,7 +35,9 @@ export function config(env = process.env) {
 /** Replaces every vars value (raw and URL-encoded) with {{NAME}}. Longest values first. */
 export function mask(text, vars = loadVars()) {
   let s = String(text ?? '');
-  const pairs = Object.entries(vars).filter(([, v]) => typeof v === 'string' && v.length >= 4).sort((a, b) => b[1].length - a[1].length);
+  // Facts kept in the state file that are not secrets: masking them would hide data the rules compare.
+  const PLAIN = /^(ACCOUNT_ON_FILE(_PREV_\d+)?|.*_SEEN_AT|.*_OPENED_AT)$/;
+  const pairs = Object.entries(vars).filter(([k, v]) => !PLAIN.test(k) && typeof v === 'string' && v.length >= 4).sort((a, b) => b[1].length - a[1].length);
   for (const [k, v] of pairs) {
     for (const form of new Set([v, encodeURIComponent(v)])) s = s.split(form).join(`{{${k}}}`);
   }
@@ -62,6 +65,7 @@ export function refusal({ method, url, caller }, cfg = config()) {
   const host = u.hostname.toLowerCase();
   if (!cfg.allowedHosts.includes(host)) return `host ${host} is not in ALLOWED_HOSTS (${cfg.allowedHosts.join(', ') || 'empty'})`;
   if (!LOCAL.has(host) && u.protocol !== 'https:') return 'only https is allowed outside localhost';
+  if (cfg.denyUrls.some((d) => sameUrl(url, d))) return 'this URL is closed in this mode (DENY_URLS): a manual fetch would open a new attempt';
   if (cfg.readOnly && method !== 'GET') return `READ_ONLY: ${method} is refused; only GET is allowed`;
   if (cfg.readOnly && !sameUrl(url, cfg.manualUrl)) return 'READ_ONLY: only the manual URL may be requested';
   if (caller === 'model' && method !== 'GET') return `the http tool sends GET only; writes go through the checked scripts in scripts/`;
@@ -87,8 +91,27 @@ export function captureAttempt(rawText) {
     return false;
   }
   if (typeof attempt !== 'string' || attempt.length < 4) return false;
-  saveState({ ATTEMPT: attempt, ATTEMPT_SEEN_AT: new Date().toISOString() });
+  saveState({ ATTEMPT: attempt, ATTEMPT_SEEN_AT: new Date().toISOString(), ...fromManual(rawText) });
   return true;
+}
+
+/**
+ * The account on file and the key-check path of this attempt, from the manual text (manual 2026-11-16:
+ * "The account on file is acct_…", "GET https://verify-s04.mega.dev/<path> with the header X-Payout-Key").
+ */
+export function fromManual(rawText) {
+  let text = '';
+  try {
+    text = String(JSON.parse(rawText)?.manual ?? '');
+  } catch {
+    text = String(rawText ?? '');
+  }
+  const out = {};
+  const acct = /account on file is (acct_[A-Za-z0-9]+)/i.exec(text)?.[1];
+  if (acct) out.ACCOUNT_ON_FILE = acct;
+  const path = /https:\/\/verify-s04\.mega\.dev\/([A-Za-z0-9_-]{8,})/.exec(text)?.[1];
+  if (path) out.VERIFY_PATH = path;
+  return out;
 }
 
 /**

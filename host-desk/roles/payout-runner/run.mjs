@@ -5,7 +5,9 @@
 // Request layer (plan.md § 0): run.mjs sets the run id, the host allowlist and the manual URL for the tools, and
 // tees pi's output, masked, into logs/run-<run id>.log.
 // READ_ONLY=1 (slice 1): ROLE.slice1.md as the system prompt; the request layer allows only GET to the manual URL.
-// Without READ_ONLY it refuses to start: only slice 1 is built (issue #1), and the full batch needs its own yes.
+// MODE=practice: ROLE.practice.md; hosts hq.mega.dev + pay-s04.mega.dev; the model's http may not GET /manual (a
+// fetch opens a new attempt); writes happen only in scripts/start.mjs and scripts/settle.mjs, each with its own URLs.
+// Anything else refuses to start: the full run (ROLE.md, ALLOW_RUN=1) needs its own yes.
 import { spawn } from 'node:child_process';
 import { createWriteStream, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -13,14 +15,24 @@ import { fileURLToPath } from 'node:url';
 import { config, mask } from './lib/net.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
-if (process.env.READ_ONLY !== '1') {
-  console.error('Only slice 1 is built: run with READ_ONLY=1. The full batch is not wired yet (plan.md § 3, § 6).');
+const MANUAL = 'https://hq.mega.dev/challenges/twenty-payouts/manual';
+let role;
+if (process.env.READ_ONLY === '1') {
+  role = 'ROLE.slice1.md';
+  process.env.ALLOWED_HOSTS ||= 'hq.mega.dev';
+  process.env.MANUAL_URL ||= 'https://hq.mega.dev/challenges/twenty-payouts/api';
+} else if (process.env.MODE === 'practice') {
+  role = 'ROLE.practice.md';
+  process.env.ALLOWED_HOSTS = 'hq.mega.dev,pay-s04.mega.dev';
+  process.env.MANUAL_URL = MANUAL;
+  process.env.DENY_URLS = MANUAL;
+  delete process.env.ALLOW_RUN;
+  delete process.env.WRITE_URLS;
+} else {
+  console.error('Run with READ_ONLY=1 (slice 1) or MODE=practice. The full run is not wired yet (plan.md § 6).');
   process.exit(2);
 }
 process.env.RUN_ID ||= new Date().toISOString().replace(/[:.]/g, '-');
-process.env.ALLOWED_HOSTS ||= 'hq.mega.dev';
-process.env.MANUAL_URL ||= 'https://hq.mega.dev/challenges/twenty-payouts/api';
-const role = process.env.READ_ONLY === '1' ? 'ROLE.slice1.md' : 'ROLE.md';
 const args = [
   '-p',
   '--no-session',
