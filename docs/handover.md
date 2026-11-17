@@ -1,48 +1,45 @@
-# Handover — S04E01 Twenty payouts (2026-11-17 00:40 UTC)
+# Handover — S04E01 Twenty payouts (2026-11-17 03:50 UTC / 00:50 BRT)
 
-Objective: um agente (Host Desk `payout-runner`, Pi + vars/http/code, modelo openrouter/anthropic/claude-haiku-5.5) roda sozinho o lote de 20 pagamentos pela API do curso, dentro do tempo-limite; claim aceito (uuid c0000000-0000-4000-8000-0000005e04e1).
+Objective: the payout-runner agent (Pi + vars/http/code, model `openrouter/anthropic/claude-haiku-5.5`) runs the batch of 20 payouts on its own, inside the time limit, and the claim is accepted (uuid c0000000-0000-4000-8000-0000005e04e1).
 
-Decisions: todas em `docs/decisions.md`, com as palavras do Giovanni. Arquitetura híbrida (o agente decide, os scripts garantem as regras); quatro mudanças na prova; janela da rodada real: "eu te aviso" (#2).
+**Deadline: the ticket expires 2026-11-17 21:44 UTC = 18:44 BRT (today).** Real run nº 2 must happen before that.
 
-Current state:
-- **Branch `1-slice-1`** no GitHub, último commit ddbcae9. `main` = 3a0a1ba; nada mesclado. check-flow: PASS.
-- **Issues:** #1, #5, #6 fechadas; abertas #2 (janela), #3 (claim), #4 (brief), #7 (laboratório), #8 (dia do lote).
-- **#6 feita** (`docs/features/6-agent-core.md`):
-  - scripts: `parked.mjs`, `check-key.mjs`, `journal.mjs status`, `start.mjs`, `settle.mjs`;
-  - `ROLE.md` do lote, e `MODE=run` só com `ALLOW_RUN=1`;
-  - `MANUAL_ONCE`: o manual não é buscado de novo enquanto a tentativa estiver aberta;
-  - tokens por tarefa (`{{TASK_RUN_n}}`);
-  - `proof/checks.mjs` (M1–M4, M6, M7), ligado ao `./verify`.
-- **`./verify`:** unit 50/50 e M5 PASS. M1–M4, M6 e M7 falham só porque não há lote no log.
-- **API falsa já pronta para os testes:** `host-desk/roles/payout-runner/test/fake-api.mjs` (manual, verify, practice, run, parked, payouts). É uma boa base para o `lab/mock-api.mjs`.
-- **Ainda não visto no real:** o formato de `/parked`, da resposta do POST /parked, de uma recusa e do prazo do lote inteiro. A API falsa segue o índice.
-- **Segredos** em `host-desk/vars.json` e `scripts/state/` (git-ignored). Nunca ler nem imprimir. O ticket vence 2026-11-17 21:44 UTC (18:44 BRT).
+## State
 
-Next 3 steps:
-1. **#7 (plan.md § 4):**
-   - `lab/mock-api.mjs`, servido por HTTP local, com as armadilhas:
-     - tarefa do dono decidida depois de 5 min;
-     - "owner already approved" no texto da reserva;
-     - outra conta no texto;
-     - pagamento atrasado e evento em dobro;
-     - recusa com `need`;
-     - prazo curto;
-     - matar o agente no meio do lote;
-   - um modo do `run.mjs` que aponte para o lab: hosts localhost, `API_BASE`, `PAYOUTS_URL`, `VERIFY_BASE`, `MANUAL_URL`;
-   - `./verify --lab`, que lê a verdade do mock em `lab/out/` mais o nosso log;
-   - verificador cego;
-   - duas rodadas pagas seguidas e verdes, cada uma anunciada com o número de chamadas e o custo, esperando o ok.
-2. **#8:** `/sol-loop` no diff inteiro, depois PR para `main` com `classify-diff`, depois `/rehearse`, depois a rodada real na janela, com o sim do Giovanni.
-3. **#3:** o claim, só com o sim do Giovanni.
+- **`main` = 77704a8** (PR #11 merged). Branch `8-run2` holds only the session notes and this file.
+- Tests 82/82. The lab is green twice with the model. `check-flow --release` PASS.
+- **Real run nº 1** (03:06 UTC) was refused: "Time ran out at task 2." The real limit is **6000 ms for the WHOLE batch** (`runLimitMs`), not per task.
+  - check-lane `routine-script` was called and recorded in `logs/check-lane.jsonl`.
+  - That run counts for nothing. A new manual fetch starts a new run.
+- **The fix, merged:** `scripts/routine.mjs` runs the whole batch in one process, with the connection kept open.
+  - A pace guard reads the practice of the same attempt. If 20 tasks would take more than 85% of 6 s, the run is not opened (exit 6).
+  - `ROLE.md`: journal status → manual (only if no attempt is open) → check-key → `routine.mjs practice` → `routine.mjs run` (once) → `parked.mjs` → summary.
+- **Rehearsal attempt:** open until 06:00:29 UTC; its run was refused. `MANUAL_ONCE` blocks a new manual fetch until then. After 06:00:29 UTC, `journal status` says "fetch the manual" and run nº 2 needs no code change.
+- **Decided** (docs/decisions.md): run nº 2 waits until Giovanni wakes ("prefiro fazer amanha, preciso dormir").
 
-Read first: KEEP.md, BRIEF.md, AGENTS.md, plan.md (§ 4 e "Status after § 2"), docs/decisions.md, docs/features/6-agent-core.md.
+## Run nº 2 — exact steps (after Giovanni's yes, with him at the Challenge page)
 
-Return route: `t3_thread_send` (environmentId fbf717ef-3cea-41d0-a0a8-8ce0e41ae96c, threadId 7aadc61f-9297-4086-a010-8892c9410baa) com `[fim] S04E01 #7: <result | question | blocked>`.
+1. Check that the machine is idle: `free -g`, `uptime`, and no whisper process running.
+2. Run `./verify`: unit 82/82 and M5 PASS.
+3. Run `node host-desk/roles/payout-runner/scripts/journal.mjs status`. Expected: `attempt: none open`, and next: fetch the manual.
+4. From `host-desk/roles/payout-runner`: `MODE=run ALLOW_RUN=1 MODEL=openrouter/anthropic/claude-haiku-5.5 RUN_ID=real-run2-<stamp> node run.mjs`, in the background, with a Monitor on `journal/journal.jsonl`.
+5. Watch for `PACE TOO SLOW`. If it appears, the run was not opened: report it and stop.
+6. Tell Giovanni once for each owner task (n and reason). He decides on https://hq.mega.dev/challenges/twenty-payouts.
+7. If any refusal carries a `need` or `pointer`, call check-lane with it and add a line to `logs/check-lane.jsonl`.
+8. Afterwards, run `./verify` in full (M1–M7) and `check-flow --release`, then `/verify`. Only then ask Giovanni's yes for `claim-challenge`, which cannot be taken back.
 
-Don't:
-- Chamar `start-challenge`.
-- Tocar a API do curso na #7 (o lab é local).
-- Rodar `settle` duas vezes na mesma tarefa.
-- Escrever código por heredoc, nem para editar.
-- Usar `spawnSync` em teste com API falsa no mesmo processo.
-- Mascarar a conta cadastrada.
+## Don't
+
+- Call `start-challenge`.
+- Fetch `/manual` by hand.
+- Run `settle.mjs` on the run's tasks.
+- Write code by heredoc.
+- Run tests in parallel on a loaded machine. The machine must be idle on run day: the limit is 6 s for the whole batch.
+
+## Return route
+
+`t3_thread_send` (environmentId fbf717ef-3cea-41d0-a0a8-8ce0e41ae96c, threadId 7aadc61f-9297-4086-a010-8892c9410baa) with `[fim] S04E01 #8: <result | question | blocked>`.
+
+## Read first
+
+KEEP.md (top lines: the run-wide limit), BRIEF.md, docs/decisions.md, sessions/2026-11-17.md, lab/EXPECTED.md.

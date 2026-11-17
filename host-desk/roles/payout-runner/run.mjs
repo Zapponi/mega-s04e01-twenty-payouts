@@ -13,7 +13,8 @@ import { spawn } from 'node:child_process';
 import { createWriteStream, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { config, mask } from './lib/net.mjs';
+import { attemptOpenUntil, config, mask, saveState } from './lib/net.mjs';
+import { state } from './lib/flow.mjs';
 import { STATE_FILE } from './extensions/vars.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -40,7 +41,7 @@ if (process.env.READ_ONLY === '1') {
     process.exit(2);
   }
   role = 'ROLE.md';
-  process.env.ALLOWED_HOSTS = 'hq.mega.dev,pay-s04.mega.dev,verify-s04.mega.dev';
+  process.env.ALLOWED_HOSTS = 'hq.mega.dev,pay-s04.mega.dev'; // no verify-s04: the manual's key check sent the key to a new host (real run 3)
   process.env.MANUAL_URL = MANUAL;
   process.env.MANUAL_ONCE = '1';
   delete process.env.DENY_URLS;
@@ -123,6 +124,17 @@ if (day) {
       if (readFileSync(lock, 'utf8') === String(process.pid)) unlinkSync(lock);
     } catch {}
   });
+}
+
+// NEW_ATTEMPT=1, the human's yes to close the open attempt (its run is over: the API, "each fetch starts a new run"),
+// so the agent fetches the manual once instead of waiting for the attempt to expire (Giovanni 2026-11-17). Only after
+// this session holds the lock: a refused second launcher never touches the state (Sol review 2026-11-17 #4).
+if (day && process.env.NEW_ATTEMPT === '1') {
+  const st = state();
+  if (attemptOpenUntil(st) > Date.now()) {
+    saveState({ ATTEMPT_CLOSED_AT: st.ATTEMPT_SEEN_AT });
+    console.log(`[run] NEW_ATTEMPT=1: the attempt fetched ${st.ATTEMPT_SEEN_AT} is closed by the human; the agent fetches the manual once.`);
+  } else console.log('[run] NEW_ATTEMPT=1: no attempt is open; nothing to close.');
 }
 
 function status() {

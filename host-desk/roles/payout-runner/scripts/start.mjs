@@ -15,10 +15,6 @@ if (batch === 'run' && process.env.ALLOW_RUN !== '1') {
   console.log('The real run is not allowed in this session (ALLOW_RUN is not 1). Stop and tell the human.');
   process.exit(1);
 }
-if (batch === 'run' && !events().some((e) => e.event === 'key_checked' && e.ok && e.attempt === st.ATTEMPT_SEEN_AT)) {
-  console.log('The payout key was not checked for this attempt (manual: "Before a run, check the payout key"). Run check-key.mjs first.');
-  process.exit(1);
-}
 if (events().some((e) => e.event === 'opened' && e.batch === batch && e.attempt === st.ATTEMPT_SEEN_AT)) {
   console.log(`The ${batch} is already open for this attempt; never open it twice. Run journal.mjs status and continue with settle${batch === 'run' ? ' or parked' : ''}.`);
   process.exit(1);

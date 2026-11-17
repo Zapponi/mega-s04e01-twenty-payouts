@@ -17,12 +17,16 @@ const att = st.ATTEMPT_SEEN_AT;
 const ev = events().filter((e) => (e.key ? e.key.endsWith(`:${att}`) : e.attempt === att));
 const lines = [];
 lines.push(open ? `attempt: open, fetched ${att}, open until ${new Date(until).toISOString()} (${Math.round((until - Date.now()) / 60000)} min left). Do not fetch the manual again.` : `attempt: none open${att ? ` (last fetched ${att}, closed)` : ''}. Fetch the manual once.`);
-const key = ev.filter((e) => e.event === 'key_checked').at(-1);
-lines.push(`key check: ${key ? (key.ok ? `ok (${key.time})` : `FAILED (http ${key.http ?? '-'}, ${key.why ?? ''})`) : 'not done in this attempt'}`);
-
+if (!open) {
+  // Real run nº 2 (2026-11-17): listing the closed attempt's batches here made the model take them for today's and
+  // refuse to fetch. A closed attempt is over; the API's own words on a refused run say a new fetch is the way on.
+  if (att) lines.push('previous attempt: closed and over. Its practice and run count for nothing now (the API, on a refused run: "Fetch the manual again: each fetch starts a new run. Payouts from a refused run do not count."). A new fetch starts a new attempt with its own key check, practice and run, from the start; fetching now does not open any batch twice.');
+  lines.push('next: fetch the manual (GET /manual, Bearer {{TICKET}}), once');
+  console.log(lines.join('\n'));
+  process.exit(0);
+}
 let next = open ? null : 'fetch the manual (GET /manual, Bearer {{TICKET}}), once';
 let stopNote = null;
-if (!next && !key?.ok) next = 'check-key.mjs';
 for (const batch of ['practice', 'run']) {
   const opened = ev.some((e) => e.event === 'opened' && e.batch === batch);
   const last = new Map();

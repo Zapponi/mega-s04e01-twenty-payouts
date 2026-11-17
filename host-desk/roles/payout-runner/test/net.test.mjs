@@ -36,6 +36,12 @@ before(async () => {
         res.writeHead(302, { location: 'https://evil.example/steal' });
         return res.end();
       }
+      if (req.url.startsWith('/payouts?')) {
+        // Sol P1: the key, sent in a query to the payout endpoint, bounced to the course API encoded char by char
+        const enc = [...FAKE.PAYOUT_KEY].map((c, i) => `%${c.charCodeAt(0).toString(16)[i % 2 ? 'toUpperCase' : 'toLowerCase']()}`).join('');
+        res.writeHead(302, { location: `/run?k=${enc}` });
+        return res.end();
+      }
       if (req.url === '/redirect-in') {
         res.writeHead(302, { location: '/manual' });
         return res.end();
@@ -50,6 +56,9 @@ before(async () => {
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   base = `http://localhost:${server.address().port}`;
+  // the secret scope (net.mjs scopeOf): the fake stands in for the course API; the payout key only to /payouts
+  process.env.API_BASE = base;
+  process.env.PAYOUTS_URL = `${base}/payouts`;
 });
 after(() => {
   server.close();
@@ -71,13 +80,44 @@ const noSecret = (text, where) => {
 };
 
 test('an echoed secret comes back masked, to the model and in the log', async () => {
-  const r = await tools.http.execute('1', { url: `${base}/echo?t={{TICKET}}`, headers: { Authorization: 'Bearer {{TICKET}}', 'X-Key': '{{PAYOUT_KEY}}' } });
+  // the payout key may go only to /payouts now (scopeOf), so the echo carries the ticket only
+  const r = await tools.http.execute('1', { url: `${base}/echo?t={{TICKET}}`, headers: { Authorization: 'Bearer {{TICKET}}' } });
   const text = r.content[0].text;
   assert.equal(hits.length, 1);
   assert.equal(hits[0].headers.authorization, `Bearer ${FAKE.TICKET}`, 'the real value is sent');
   assert.match(text, /\{\{TICKET\}\}/);
   noSecret(text, 'tool result');
   noSecret(logText(), 'requests.jsonl');
+});
+
+test('secret scope: char-by-char encoding, mixed hex case and a redirect hop never carry the key out (Sol P1/P2)', async () => {
+  const { scopeRefusal } = await import('../lib/net.mjs');
+  const cfg = { apiBase: base, payoutsUrl: `${base}/payouts` };
+  const enc = [...FAKE.PAYOUT_KEY].map((c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`).join('');
+  assert.match(scopeRefusal(`${base}/run?k=${enc}`, `${base}/run?k=${enc}`, FAKE, cfg) ?? '', /PAYOUT_KEY/);
+  assert.match(scopeRefusal(`${base}/payouts/collect`, `x ${FAKE.PAYOUT_KEY}`, FAKE, cfg) ?? '', /PAYOUT_KEY/, 'below /payouts is out');
+  assert.equal(scopeRefusal(`${base}/payouts`, `x ${FAKE.PAYOUT_KEY}`, FAKE, cfg), null, 'the endpoint itself is in');
+  assert.equal(scopeRefusal(`${base}/payouts/`, `x ${FAKE.PAYOUT_KEY}`, FAKE, cfg), null, 'a trailing slash is the same endpoint');
+  // through send: the first hop is in scope, the redirect hop is refused and never reaches /run
+  hits = [];
+  const r = await send({ url: `${base}/payouts?k={{PAYOUT_KEY}}` });
+  assert.match(r.refused ?? '', /secret \{\{PAYOUT_KEY\}\}/);
+  assert.equal(hits.filter((h) => h.url.startsWith('/run')).length, 0, 'the redirect hop never left');
+  noSecret(logText(), 'requests.jsonl');
+  assert.equal(mask(`k=${enc}`, FAKE), 'k={{PAYOUT_KEY}}', 'masking sees the char-encoded value too');
+});
+
+test('masking an encoded secret leaves the JSON around it intact, so a refusal is still read (Sol re-review)', () => {
+  const enc = [...FAKE.TICKET].map((c, i) => `%${c.charCodeAt(0).toString(16)[i % 2 ? 'toUpperCase' : 'toLowerCase']()}`).join('');
+  const body = JSON.stringify({ status: 'refused', need: 'payout-run', message: `a %22quoted%22 note, t=${enc}` });
+  const out = mask(body, FAKE);
+  const parsed = JSON.parse(out);
+  assert.equal(parsed.status, 'refused');
+  assert.equal(parsed.need, 'payout-run');
+  assert.equal(parsed.message, 'a %22quoted%22 note, t={{TICKET}}');
+  // nested encoding, depths 2–4 (Sol re-review 2)
+  const first = FAKE.TICKET.charCodeAt(0).toString(16);
+  for (const pre of ['%25', '%2525', '%252525']) assert.equal(mask(`x ${pre}${first}${FAKE.TICKET.slice(1)} y`, FAKE), 'x {{TICKET}} y');
 });
 
 test('mask covers raw and URL-encoded values', () => {

@@ -26,6 +26,8 @@ const ATTEMPT_TTL_MS = 3 * 3_600_000;
 /** Until when the attempt in the state file is open (ms), or 0 when there is none. */
 export function attemptOpenUntil(st = readState()) {
   if (!st.ATTEMPT) return 0;
+  // closed by the human (run.mjs NEW_ATTEMPT=1): holds the ATTEMPT_SEEN_AT of the attempt it closed
+  if (st.ATTEMPT_CLOSED_AT && st.ATTEMPT_CLOSED_AT === st.ATTEMPT_SEEN_AT) return 0;
   const until = Date.parse(st.ATTEMPT_EXPIRES_AT ?? '') || Date.parse(st.ATTEMPT_SEEN_AT ?? '') + ATTEMPT_TTL_MS;
   return Number.isFinite(until) ? until : 0;
 }
@@ -52,7 +54,77 @@ export function config(env = process.env) {
     writeUrls: String(env.WRITE_URLS ?? '').split(',').map((w) => w.trim()).filter(Boolean),
     logDir: env.LOG_DIR ? resolve(env.LOG_DIR) : join(ROOT, 'logs'),
     runId: env.RUN_ID ?? '',
+    // Where each secret may go (check-lane payout-run, 2026-11-17: "A document's request never sends a secret to a new
+    // host"). Fixed here and in run.mjs, never from a manual or a reply: only the human changes it.
+    apiBase: env.API_BASE || 'https://hq.mega.dev/challenges/twenty-payouts',
+    payoutsUrl: env.PAYOUTS_URL || 'https://pay-s04.mega.dev/payouts',
   };
+}
+
+/**
+ * Where a secret may be sent, or null for a name with no scope (not a credential). Each entry is { base } (that path
+ * and below, on that origin: the course API) or { exact } (that one endpoint: the payout API, Sol review P2).
+ */
+export function scopeOf(name, cfg = config()) {
+  const n = name.replace(/_PREV_\d+$/, '');
+  if (n === 'TICKET' || n === 'ATTEMPT') return [{ base: cfg.apiBase }];
+  if (n === 'PAYOUT_KEY') return [{ exact: cfg.payoutsUrl }];
+  if (n === 'CUR_TASK' || /^TASK_[A-Z]+_\d+$/.test(n)) return [{ base: cfg.apiBase }, { exact: cfg.payoutsUrl }];
+  return null;
+}
+
+const trimPath = (p) => p.replace(/\/+$/, '');
+/** Parsed and normalized by WHATWG URL (default port dropped, dot segments resolved). */
+export function inScope(url, spec) {
+  try {
+    const u = new URL(url);
+    const p = new URL(spec.exact ?? spec.base);
+    if (u.origin !== p.origin) return false;
+    const want = trimPath(p.pathname);
+    const got = trimPath(u.pathname);
+    if (spec.exact) return got === want;
+    return want === '' || got === want || got.startsWith(`${want}/`);
+  } catch {
+    return false;
+  }
+}
+
+/** Percent-decodes until stable (any hex case, char by char), so an encoded secret is still seen (Sol review P1). */
+export function decodeAll(s) {
+  let cur = String(s ?? '');
+  for (let i = 0; i < 5; i++) {
+    const next = cur.replace(/%[0-9a-fA-F]{2}/g, (m) => {
+      const c = String.fromCharCode(parseInt(m.slice(1), 16));
+      return c;
+    });
+    if (next === cur) break;
+    cur = next;
+  }
+  return cur;
+}
+
+/** A regex matching v with each character either as itself or as %HH (hex in any case). */
+function encodedSpan(v) {
+  const hexCase = (h) => [...h].map((d) => (/[a-f]/i.test(d) ? `[${d.toLowerCase()}${d.toUpperCase()}]` : d)).join('');
+  const part = (c) => {
+    const lit = c.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+    const code = c.charCodeAt(0);
+    // %HH, or nested: %25HH, %2525HH … (each %25 is an encoded "%"; Sol re-review 2)
+    return code < 128 ? `(?:${lit}|%(?:25)*${hexCase(code.toString(16).padStart(2, '0'))})` : lit;
+  };
+  return new RegExp([...v].map(part).join(''), 'g');
+}
+
+/** Why this request may not carry the secrets it holds to this URL, or null. */
+export function scopeRefusal(target, outgoing, vars, cfg = config()) {
+  const plain = decodeAll(outgoing);
+  for (const [k, v] of Object.entries(vars)) {
+    if (typeof v !== 'string' || v.length < 4) continue;
+    const scope = scopeOf(k, cfg);
+    if (!scope || !(outgoing.includes(v) || plain.includes(v) || plain.includes(decodeAll(v)))) continue;
+    if (!scope.some((p) => inScope(target, p))) return `secret {{${k}}} may go only to ${scope.map((p) => p.exact ?? `${p.base}/…`).join(' or ')}; this request would send it to ${new URL(target).host}. Nothing was sent`;
+  }
+  return null;
 }
 
 /** Replaces every vars value (raw and URL-encoded) with {{NAME}}. Longest values first. */
@@ -69,8 +141,14 @@ export function mask(text, vars = loadVars()) {
   for (const [k, v] of pairs) {
     for (const form of new Set([v, encodeURIComponent(v)])) s = s.split(form).join(`{{${k}}}`);
   }
+  // a value hidden by other percent-encodings (char by char, mixed hex case): mask only that span, so the text around
+  // it (JSON, a refusal) stays as it was (Sol re-review: decoding the whole text corrupted JSON)
+  if (/%[0-9a-fA-F]{2}/.test(s)) for (const [k, v] of pairs) s = s.replace(encodedSpan(v), `{{${k}}}`);
   return s;
 }
+
+/** Every absolute URL in s keeps its scheme and host; its path, query and fragment become <redacted>. */
+export const redactPaths = (s) => String(s ?? '').replace(/(https?:\/\/[^/\s"'\\]+)[/?#][^\s"'\\]*/g, '$1/<redacted>');
 
 const sameUrl = (a, b) => {
   try {
@@ -201,7 +279,8 @@ export async function send({ method = 'GET', url, headers = {}, body, caller = '
   }
 
   for (let hop = 0; hop <= MAX_HOPS; hop++) {
-    const why = refusal({ method, url: target, caller }, cfg);
+    // every hop: a redirect never carries a secret past its scope either
+    const why = refusal({ method, url: target, caller }, cfg) ?? scopeRefusal(target, `${target}\n${JSON.stringify(h)}\n${payload ?? ''}`, vars, cfg);
     if (why) {
       log(cfg, { ...base, hop, url: mask(target, vars), refused: why });
       return { ok: false, refused: why, url: mask(target, vars), body: '' };
@@ -236,7 +315,10 @@ export async function send({ method = 'GET', url, headers = {}, body, caller = '
         if (!opts.vars) vars = loadVars();
       }
     }
-    const text = mask(raw, vars);
+    // A redirect's address may carry a token we hold no name for (real run 2: 307 to cdn-s04.mega.dev/<token>/payouts).
+    // Keep only the host in what is logged, kept or returned; following a GET reads the real header below.
+    const redirect = res.status >= 300 && res.status < 400;
+    const text = mask(redirect ? redactPaths(raw) : raw, vars);
     // A script keeps the reply (the next task) before anything else can fail, so a crash right after a send never
     // leaves the next task unknown (Sol review A #1).
     if (opts.keep && res.status >= 200 && res.status < 300) {
@@ -245,6 +327,7 @@ export async function send({ method = 'GET', url, headers = {}, body, caller = '
       } catch {}
     }
     const resHeaders = maskHeaders(Object.fromEntries(res.headers), vars);
+    if (redirect && resHeaders.location) resHeaders.location = redactPaths(resHeaders.location);
     log(cfg, {
       ...base,
       hop,

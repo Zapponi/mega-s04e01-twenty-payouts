@@ -87,6 +87,11 @@ async function act(n, decision, entry, seenAt) {
   // the human hears of it instead (Sol re-review #1).
   const again = events().find((e) => e.status === 'sent' && e.key !== key && e.key?.endsWith(`:${st.ATTEMPT_SEEN_AT}`) && e.bookingId === task.booking?.id && e.amount === a.amount);
   if (again) return stop(n, `booking ${task.booking?.id} for ${a.amount} EUR was already sent as ${again.key.split(':').slice(0, 2).join(' ')}`);
+  // A payout already tried for this task (routine flagged it after a redirect or an unclear result) is never sent
+  // again, even after an owner's "yes": it may have landed, or its address moved. Decline still finishes it.
+  const mine = events().filter((e) => e.key === key);
+  const tried = mine.findLast((e) => ['uncertain', 'moved'].includes(e.status)) ?? mine.find((e) => e.status === 'sent');
+  if (tried) return stop(n, `a payout was already tried for this task (${tried.status}${tried.http ? `, http ${tried.http}` : ''}); never sent again. Only "decline" can finish it here`);
   if (!claim(key, 'owner-pay')) return say(`task ${n} is already being paid by another run: nothing sent.`);
   journal({ key, status: 'sent', amount: a.amount, nights: a.nights, account, decision, bookingId: task.booking?.id });
   const p = await send({

@@ -26,6 +26,9 @@ export async function startFake() {
       this.flagReply = opts.flagReply ?? null; // a reply to a flag other than the next task
       this.verifyReply = opts.verifyReply ?? null; // a 200 reply to the key check other than ok
       this.payoutReply = opts.payoutReply ?? null; // a 200 reply to a payout other than paid
+      this.runLimitMs = opts.runLimitMs ?? 8000; // shown on task 1
+      this.payoutDelayFor = opts.payoutDelayFor ?? {}; // n → ms before that task's payout reply
+      this.payoutStatus = opts.payoutStatus ?? {}; // n → { code, body }: that task's payout reply (real run 2: 307 "moved")
       this.replyDelay = opts.replyDelay ?? {}; // 'POST /run' → ms: processed at once, answered late
       this.attempts = 0;
       this.connections = 0;
@@ -33,7 +36,7 @@ export async function startFake() {
     task(batch, n) {
       const o = batch === 'run' ? this.over[n] ?? {} : {};
       return {
-        status: 'task', n, of: this.of[batch], ...(n === 1 ? { runLimitMs: 8000 } : {}), timeLeftMs: 8000,
+        status: 'task', n, of: this.of[batch], ...(n === 1 ? { runLimitMs: this.runLimitMs } : {}), timeLeftMs: 8000,
         booking: booking(n, o.booking), payout: { account: ON_FILE, url: 'https://pay-s04.mega.dev/payouts', ...o.payout },
         task: token(batch, n), next: 'Pay this booking at the payout API, then send its answer and the payout receipt here.',
       };
@@ -73,6 +76,10 @@ export async function startFake() {
       }
       if (req.url === '/payouts') {
         if (f.payoutDelayMs) await new Promise((r) => setTimeout(r, f.payoutDelayMs));
+        const wait = f.payoutDelayFor?.[nOf(b.task)];
+        if (wait) await new Promise((r) => setTimeout(r, wait));
+        const own = f.payoutStatus?.[nOf(b.task)];
+        if (own) return json(own.code, own.body);
         if (f.payoutReply) return json(200, f.payoutReply);
         return json(200, { status: 'paid', receipt: `v1.rcpt_${nOf(b.task)}_${b.account}_${b.amount}`, next: 'Send this receipt with the task\'s answer to the run.' });
       }
