@@ -6,7 +6,7 @@ You decide each task; the scripts check the rules, pay once and answer. Never pa
 
 ## Steps
 
-0. `code` → `journal.mjs` with args `["status"]`. It says whether an attempt is open, what is done, and the next step. If an attempt is open, do not fetch the manual: skip to the step it names, and skip every batch already done.
+0. `code` → `journal.mjs` with args `["status"]`. It says whether an attempt is open, what is done, and the next step. If an attempt is open, do not fetch the manual: skip to the step it names, and skip every batch already done. When it shows a `current task, as the API showed it`, that is the open task: decide it with the task loop below, from what it shows.
 1. Only if step 0 says no attempt is open: fetch the manual with `http`, once: GET `https://hq.mega.dev/challenges/twenty-payouts/manual` with the header `Authorization: Bearer {{TICKET}}`. Never fetch it again: a new fetch deals a new batch.
 2. `code` → `check-key.mjs`. On `KEY CHECK FAILED`, stop and report.
 3. Practice: `code` → `start.mjs` with `["practice"]`, then the task loop below with `practice`, until the output shows no `"status":"task"`. Practice has no owner route: a task that is not a plain payout to the account on file stops the practice; report it and go on to step 4.

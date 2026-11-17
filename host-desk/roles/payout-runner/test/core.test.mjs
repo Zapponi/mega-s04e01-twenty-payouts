@@ -254,6 +254,10 @@ test('restart: killed after task 7, the next session continues at 8; nothing twi
   assert.match(s.out, /attempt: open/);
   assert.match(s.out, /run: opened; answered \[1,2,3,4,5,6,7\]/);
   assert.match(s.out, /next: settle\.mjs run pay \(or flag\) for task 8/);
+  // the new session sees task 8 itself, as the API gave it, so it can decide it (lab run 2026-11-17T01-01-38: it could not)
+  assert.match(s.out, /run current task, as the API showed it: \{"status":"task","n":8,.*"booking":\{.*"payout":\{"account":"acct_onfile0001"/);
+  assert.match(s.out, /"task":"\{\{TASK_RUN_8\}\}"/, 'the token stays masked');
+  noSecrets(s.out, 'journal status');
   assert.match((await fetchManual()).out, /REFUSED/);
   assert.notEqual((await run('start.mjs', 'run')).code, 0);
   for (let i = 8; i <= 10; i++) assert.equal((await run('settle.mjs', 'run', 'pay')).code, 0);

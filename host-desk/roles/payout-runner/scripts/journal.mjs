@@ -36,7 +36,12 @@ for (const batch of ['practice', 'run']) {
   const runOpened = ev.some((e) => e.event === 'opened' && e.batch === 'run');
   if (!opened && batch === 'practice' && runOpened) continue; // practice is optional; once the run is open it is skipped
   if (!opened) next = `start.mjs ${batch}`;
-  else if (cur?.status === 'task' && (!s || s === 'not_sent')) next = `settle.mjs ${batch} pay (or flag) for task ${cur.n}`;
+  else if (cur?.status === 'task' && (!s || s === 'not_sent')) {
+    // After a restart the task is in no tool output yet: show it here, as the API gave it (masked), to decide from.
+    const { next: _hint, ...shown } = cur;
+    lines.push(`${batch} current task, as the API showed it: ${JSON.stringify(shown)}`);
+    next = `settle.mjs ${batch} pay (or flag) for task ${cur.n}`;
+  }
   else if (s === 'paid') next = `settle.mjs ${batch} answer for task ${cur.n}`;
   else if (['sent', 'uncertain', 'refused', 'flag_sent'].includes(s)) {
     // that task is never retried; the rest of the day goes on
