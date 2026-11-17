@@ -146,7 +146,9 @@ while (pending().length) {
       byN.get(n).push(e);
     }
     for (const [n, entries] of byN) {
-      const decisions = [...new Set(entries.map((e) => e.decision).filter((d) => d !== null && d !== undefined))];
+      // null is "not decided yet" (index); a text "null", "pending" or "" is read the same way, never as a decision
+      const undecided = (d) => d === null || d === undefined || (typeof d === 'string' && /^(null|pending|)$/i.test(d.trim()));
+      const decisions = [...new Set(entries.map((e) => e.decision).filter((d) => !undecided(d)))];
       if (decisions.length === 0) continue; // null: not decided yet
       if (decisions.length > 1) {
         stop(n, `/parked shows ${decisions.join(' and ')} at once`);

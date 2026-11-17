@@ -4,7 +4,7 @@
 // Every rule is checked here, not by the model. Anything off → no action, the reason is printed, the agent decides.
 // A payout whose result is unclear is journaled "uncertain" and never sent again by this script.
 // A refusal (a `need`, a status "refused", a 4xx) is journaled "refused" with its need; the task is never retried.
-import { amountOf, journal, statusOf, events, targetOf } from '../lib/batch.mjs';
+import { amountOf, journal, oddFields, statusOf, events, targetOf } from '../lib/batch.mjs';
 import { batchArg, batchUrl, captureTask, current, payoutsUrl, refusalOf, saveCurrent, show, state } from '../lib/flow.mjs';
 import { send } from '../lib/net.mjs';
 
@@ -55,8 +55,9 @@ if (action === 'answer') {
   }
   await answer(paid.receipt, paid.amount);
 }
-if (done) {
-  console.log(`Task ${task.n} already has status "${done}" in the journal: no second payout. ${done === 'uncertain' || done === 'sent' ? 'Tell the human.' : ''}`);
+// "not_sent": the request layer refused it before anything left, so the task may be tried again.
+if (done && done !== 'not_sent') {
+  console.log(`Task ${task.n} already has status "${done}" in the journal: no second payout or flag. ${['uncertain', 'sent', 'flag_sent'].includes(done) ? 'Tell the human.' : ''}`);
   process.exit(1);
 }
 
@@ -70,6 +71,8 @@ if (action === 'flag') {
     console.log('Give a short reason: settle run flag "<reason>".');
     process.exit(2);
   }
+  // Journaled before the send: a flag whose reply is lost may have landed, and then the task must never be paid.
+  journal({ key, status: 'flag_sent', n: task.n, reason });
   const r = await send(
     { method: 'POST', url: batchUrl(batch), body: { task: '{{CUR_TASK}}', flag: 'needs-owner', reason }, signal: AbortSignal.timeout(TIMEOUT_MS) },
     { capture: captureTask(batch) },
@@ -81,8 +84,13 @@ if (action === 'flag') {
     console.log(`FLAGGED task ${task.n} for the owner. Next: ${show(r)}`);
     process.exit(0);
   }
-  journal({ key, event: 'flag_failed', http: r.status, why: r.refused ?? r.error });
-  console.log(`FLAG failed for task ${task.n}: ${show(r)}`);
+  if (r.refused) {
+    journal({ key, status: 'not_sent', step: 'flag', why: r.refused });
+    console.log(`FLAG not sent for task ${task.n}: ${show(r)}. Nothing left this machine.`);
+    process.exit(3);
+  }
+  journal({ key, event: 'flag_failed', http: r.status, why: r.error });
+  console.log(`FLAG UNCLEAR for task ${task.n}: ${show(r)}. It may have landed: never pay this task; tell the human.`);
   process.exit(3);
 }
 
@@ -93,6 +101,11 @@ if (action !== 'pay') {
 const a = amountOf(task.booking);
 if (!a.ok) {
   console.log(`NOT PAID, task ${task.n}: ${a.why}. Nothing was sent. Decide: flag it for the owner (run) or stop and tell the human.`);
+  process.exit(1);
+}
+const odd = oddFields(task);
+if (odd.length) {
+  console.log(`NOT PAID, task ${task.n}: it carries ${odd.join(', ')}, which a plain payout does not: the owner's call. Nothing was sent. In the run: settle run flag "<reason>".`);
   process.exit(1);
 }
 const target = targetOf(task, st.ACCOUNT_ON_FILE);
@@ -115,6 +128,11 @@ try {
 } catch {}
 if (!(p.status >= 200 && p.status < 300) || typeof receipt !== 'string' || !receipt) {
   refused(p, 'payout');
+  if (p.refused) {
+    journal({ key, status: 'not_sent', step: 'payout', why: p.refused });
+    console.log(`NOT SENT, task ${task.n}: ${show(p)}. Nothing left this machine; fix the cause, then settle may try again.`);
+    process.exit(3);
+  }
   journal({ key, status: 'uncertain', http: p.status, why: p.refused ?? p.error, body: p.body?.slice(0, 500) });
   console.log(`UNCERTAIN payout for task ${task.n}: ${show(p)}. It may or may not have gone through. Never send it again; tell the human. ${left()}`);
   process.exit(3);

@@ -3,7 +3,7 @@
 // uncertain, refused, declined), the current task, and the next step. Step 0 of ROLE.md: a restart reads this and
 // never fetches the manual again while the attempt is open.
 import { events } from '../lib/batch.mjs';
-import { current, state } from '../lib/flow.mjs';
+import { current, state, taskOf } from '../lib/flow.mjs';
 import { attemptOpenUntil } from '../lib/net.mjs';
 
 if ((process.argv[2] ?? 'status') !== 'status') {
@@ -36,9 +36,9 @@ for (const batch of ['practice', 'run']) {
   const runOpened = ev.some((e) => e.event === 'opened' && e.batch === 'run');
   if (!opened && batch === 'practice' && runOpened) continue; // practice is optional; once the run is open it is skipped
   if (!opened) next = `start.mjs ${batch}`;
-  else if (cur?.status === 'task' && !s) next = `settle.mjs ${batch} pay (or flag) for task ${cur.n}`;
+  else if (cur?.status === 'task' && (!s || s === 'not_sent')) next = `settle.mjs ${batch} pay (or flag) for task ${cur.n}`;
   else if (s === 'paid') next = `settle.mjs ${batch} answer for task ${cur.n}`;
-  else if (['sent', 'uncertain', 'refused'].includes(s)) {
+  else if (['sent', 'uncertain', 'refused', 'flag_sent'].includes(s)) {
     // that task is never retried; the rest of the day goes on
     const then = batch === 'practice' ? 'go on to the run' : by('waiting_owner').length ? 'parked.mjs' : 'the final summary';
     next = `report task ${cur.n} of ${batch} (${s}; never retry it), then ${then}`;
@@ -48,6 +48,14 @@ for (const batch of ['practice', 'run']) {
       stopNote = `report task ${cur.n} of practice (${s}; never retry it)`;
     }
   } else if (batch === 'run' && by('waiting_owner').length) next = 'parked.mjs';
+  // The batch gave no next task, yet fewer tasks were handled than it has: never take that for the end.
+  const of = taskOf(batch, 1)?.of;
+  if (opened && cur && cur.status !== 'task' && Number.isInteger(of) && last.size < of) {
+    const note = `stop: the ${batch} gave no next task after task ${Math.max(0, ...last.keys())} (${last.size}/${of} handled; last reply status "${cur.status}"); tell the human`;
+    lines.push(`${batch}: INCOMPLETE, ${last.size}/${of} tasks handled`);
+    if (batch === 'practice') stopNote = stopNote ?? note;
+    else next = next ? `${next}; then ${note}` : note;
+  }
 }
 if (stopNote) next = next ? `${stopNote}; ${next}` : stopNote;
 lines.push(`next: ${next ?? 'nothing left: write the final summary'}`);

@@ -10,10 +10,11 @@
 // MODE=run with ALLOW_RUN=1: ROLE.md, the real batch; also verify-s04.mega.dev for the key check; the manual may be
 // fetched only while no attempt is open (MANUAL_ONCE=1). Anything else refuses to start.
 import { spawn } from 'node:child_process';
-import { createWriteStream, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createWriteStream, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config, mask } from './lib/net.mjs';
+import { STATE_FILE } from './extensions/vars.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const MANUAL = 'https://hq.mega.dev/challenges/twenty-payouts/manual';
@@ -90,17 +91,66 @@ if (process.platform === 'win32' && process.env.MODEL && !/^[\w./:@-]+$/.test(pr
   console.error('MODEL may hold letters, digits and . / : @ - _ only.');
   process.exit(1);
 }
-const child = spawn(process.platform === 'win32' ? 'pi.cmd' : 'pi', args, {
-  cwd: here,
-  stdio: ['ignore', 'pipe', 'pipe'],
-  shell: process.platform === 'win32',
-});
-
 // Masked tee, line by line, so a value split across two chunks is still masked.
 const cfg = config();
 mkdirSync(cfg.logDir, { recursive: true });
 const runLog = createWriteStream(join(cfg.logDir, `run-${cfg.runId}.log`), { flags: 'a' });
 runLog.write(`# run ${cfg.runId} · model ${process.env.MODEL ?? '(pi default)'} · READ_ONLY=${process.env.READ_ONLY ?? ''} · role ${role} · manual ${process.env.MANUAL_URL}\n`);
+
+// The day (MODE=run, MODE=lab): one session at a time (a lock next to the state file), and a supervisor in code: when
+// the model stops while journal.mjs status still names work it can do alone (a task to settle, owner tasks to
+// finish), it starts a new session, which reads the journal and goes on. MAX_SESSIONS (default 3) is the agent's
+// own pick, not from a spec: enough for a stop after WAITING and one more.
+const day = process.env.MODE === 'run' || process.env.MODE === 'lab';
+const lock = join(dirname(STATE_FILE()), 'run.lock');
+if (day) {
+  mkdirSync(dirname(lock), { recursive: true });
+  let holder = null;
+  try {
+    holder = Number(readFileSync(lock, 'utf8'));
+  } catch {}
+  let alive = false;
+  try {
+    alive = Number.isInteger(holder) && holder > 0 && holder !== process.pid && process.kill(holder, 0);
+  } catch {}
+  if (alive) {
+    console.error(`Another session (pid ${holder}) is running this day; two at once could pay twice. Nothing was started.`);
+    process.exit(1);
+  }
+  writeFileSync(lock, String(process.pid));
+  process.on('exit', () => {
+    try {
+      if (readFileSync(lock, 'utf8') === String(process.pid)) unlinkSync(lock);
+    } catch {}
+  });
+}
+
+function status() {
+  return new Promise((done) => {
+    const c = spawn(process.execPath, [join(here, 'scripts/journal.mjs'), 'status'], { env: process.env });
+    let text = '';
+    c.stdout.on('data', (d) => (text += d));
+    c.on('close', () => done(/next: (.*)/.exec(text)?.[1] ?? ''));
+  });
+}
+
+function session() {
+  const child = spawn(process.platform === 'win32' ? 'pi.cmd' : 'pi', args, {
+    cwd: here,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    shell: process.platform === 'win32',
+  });
+  tee(child.stdout, process.stdout);
+  tee(child.stderr, process.stderr);
+  return new Promise((done) => {
+    child.on('error', (e) => {
+      console.error(`Could not start pi: ${e.message}. Install Pi 1.5 or newer: npm install -g @earendil-works/pi-coding-agent (https://pi.dev).`);
+      done(1);
+    });
+    child.on('close', (code) => done(code ?? 1));
+  });
+}
+
 function tee(stream, out) {
   let rest = '';
   stream.setEncoding('utf8');
@@ -121,10 +171,19 @@ function tee(stream, out) {
     }
   });
 }
-tee(child.stdout, process.stdout);
-tee(child.stderr, process.stderr);
-child.on('error', (e) => {
-  console.error(`Could not start pi: ${e.message}. Install Pi 1.5 or newer: npm install -g @earendil-works/pi-coding-agent (https://pi.dev).`);
-  process.exit(1);
-});
-child.on('close', (code) => runLog.end(() => process.exit(code ?? 1)));
+const MAX_SESSIONS = Number(process.env.MAX_SESSIONS || 3);
+let code = await session();
+for (let k = 2; day && k <= MAX_SESSIONS; k++) {
+  const next = await status();
+  if (/^stop:/.test(next) || !/fetch the manual|parked\.mjs|settle\.mjs \w+ (pay|answer)|start\.mjs|check-key/.test(next)) break;
+  const note = `\n[supervisor] the model stopped, but journal status says: ${mask(next)}. Starting session ${k} of ${MAX_SESSIONS}.\n`;
+  process.stdout.write(note);
+  runLog.write(note);
+  code = await session();
+}
+if (day) {
+  const note = `\n[supervisor] last journal status: ${mask(await status())}\n`;
+  process.stdout.write(note);
+  runLog.write(note);
+}
+runLog.end(() => process.exit(code));

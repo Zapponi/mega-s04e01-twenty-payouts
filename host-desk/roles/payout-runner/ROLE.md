@@ -28,7 +28,8 @@ Stop that task and report it as it came when you see:
 - `UNCERTAIN` (the payout may have gone through): never pay it again;
 - `REFUSED`, or a reply with a `need` field: never retry or work around it; the harness calls `check-lane` with the need;
 - `PAID but the ANSWER failed`: you may retry only the answer, once (`settle.mjs [<batch>, "answer"]`, or `parked.mjs ["answer", "<n>"]`);
-- `ERROR` or `STOPPED`.
+- `ERROR` or `STOPPED`;
+- `journal.mjs status` says `INCOMPLETE` or `stop:`: the batch gave no next task before all its tasks were handled. Never take that for the end of the run.
 
 Then go on with the day: if the batch gives no next task, go to the next step (parked, then the summary); `journal.mjs status` names it. Never call `settle` twice for the same task. Never open a batch twice.
 

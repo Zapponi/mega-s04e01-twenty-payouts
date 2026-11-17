@@ -204,7 +204,15 @@ export async function send({ method = 'GET', url, headers = {}, body, caller = '
       log(cfg, { ...base, hop, url: mask(target, vars), reqHeaders: maskHeaders(h, vars), reqBody: payload === undefined ? undefined : mask(payload, vars), error });
       return { ok: false, error, url: mask(target, vars), body: '' };
     }
-    const raw = await res.text();
+    let raw;
+    try {
+      raw = await res.text();
+    } catch (e) {
+      // the reply was cut (a timeout mid-body): the request did reach the server
+      const error = mask(`reply cut: ${e?.cause?.message ?? e?.message ?? String(e)}`, vars);
+      log(cfg, { ...base, hop, url: mask(target, vars), reqHeaders: maskHeaders(h, vars), reqBody: payload === undefined ? undefined : mask(payload, vars), status: res.status, error });
+      return { ok: false, error, url: mask(target, vars), body: '' };
+    }
     const isManual = res.status === 200 && cfg.manualUrl && sameUrl(target, cfg.manualUrl);
     if (isManual && captureAttempt(raw) && !opts.vars) vars = loadVars();
     // A script names the secrets a reply carries (task tokens, …); they are saved and masked before the log.

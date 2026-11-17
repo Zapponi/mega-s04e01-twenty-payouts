@@ -81,7 +81,9 @@ export function refusalOf(r) {
   } catch {}
   const need = b && typeof b === 'object' ? b.need : undefined;
   const st = b && typeof b === 'object' ? String(b.status ?? '') : '';
-  if (need !== undefined || /^(refused|rejected|denied)$/i.test(st) || (r.status >= 400 && r.status < 500)) {
+  // 408, 425 and 429 say "not now", not "no": they are not a refusal (the answer may be retried).
+  const retryable = [408, 425, 429].includes(r.status);
+  if (need !== undefined || /^(refused|rejected|denied)$/i.test(st) || (r.status >= 400 && r.status < 500 && !retryable)) {
     const why = (b && (b.reason ?? b.error ?? b.message)) ?? `http ${r.status}`;
     return { need: need === undefined ? undefined : String(need), why: String(why).slice(0, 300) };
   }

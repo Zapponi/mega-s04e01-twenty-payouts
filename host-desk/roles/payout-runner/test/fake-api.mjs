@@ -23,6 +23,7 @@ export async function startFake() {
       this.dupEntries = !!opts.dupEntries;
       this.payoutDelayMs = opts.payoutDelayMs ?? 0;
       this.refuseAnswer = opts.refuseAnswer ?? null; // n → reply { code, body }
+      this.flagReply = opts.flagReply ?? null; // a reply to a flag other than the next task
       this.attempts = 0;
     },
     task(batch, n) {
@@ -70,7 +71,7 @@ export async function startFake() {
         const n = nOf(b.task);
         if (b.flag) {
           f.parked.set(n, null);
-          return json(200, next(batch, n));
+          return json(200, f.flagReply ?? next(batch, n));
         }
         if (b.answer !== undefined) {
           const r = f.refuseAnswer?.[n];

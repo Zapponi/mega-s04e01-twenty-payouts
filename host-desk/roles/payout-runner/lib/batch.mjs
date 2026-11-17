@@ -25,6 +25,19 @@ export function amountOf(booking) {
   return { ok: true, nights, amount: nights * nightlyRate + cleaningFee };
 }
 
+// The fields a plain task carries (the real practice replies, KEEP.md). Anything else in the booking or the payout
+// (a note, an approval, a second account) is something the task asks for: never paid without the owner.
+const BOOKING_KEYS = new Set(['id', 'checkIn', 'checkOut', 'nightlyRate', 'cleaningFee', 'currency']);
+const PAYOUT_KEYS = new Set(['account', 'url']);
+
+/** The extra fields that keep a task from being a plain payout, e.g. ['booking.note'], or []. */
+export function oddFields(task) {
+  const extra = [];
+  for (const k of Object.keys(task?.booking ?? {})) if (!BOOKING_KEYS.has(k)) extra.push(`booking.${k}`);
+  for (const k of Object.keys(task?.payout ?? {})) if (!PAYOUT_KEYS.has(k)) extra.push(`payout.${k}`);
+  return extra;
+}
+
 /** 'on-file' | 'owner' | { why } — where this task's money may go without the owner. */
 export function targetOf(task, accountOnFile) {
   const account = task?.payout?.account;

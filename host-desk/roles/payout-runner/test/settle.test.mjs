@@ -67,6 +67,9 @@ beforeEach(() => {
   };
   mkdirSync(dirname(env.STATE_FILE), { recursive: true });
   writeFileSync(env.STATE_FILE, JSON.stringify({ ATTEMPT: 'att_FAKE_secret_attempt', ATTEMPT_SEEN_AT: '2026-11-16T00:00:00Z', ACCOUNT_ON_FILE: ON_FILE }));
+  // the key check of this attempt passed (start.mjs run requires it)
+  mkdirSync(env.JOURNAL_DIR, { recursive: true });
+  writeFileSync(join(env.JOURNAL_DIR, 'journal.jsonl'), `${JSON.stringify({ time: '2026-11-16T00:00:01Z', event: 'key_checked', attempt: '2026-11-16T00:00:00Z', ok: true })}\n`);
 });
 
 // Async: the fake API runs in this process, so a blocking spawn would deadlock it.

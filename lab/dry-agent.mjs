@@ -3,7 +3,6 @@
 // account, or booking text that asks for something → flag; else pay). It proves the mock, the runner and
 // ./verify --lab; it proves nothing about the model. Env: the same as run.mjs MODE=lab (LAB_URL, LAB_OUT).
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -28,13 +27,6 @@ const code = (file, ...args) =>
       done({ status, text });
     });
   });
-const readJson = (f) => {
-  try {
-    return JSON.parse(readFileSync(f, 'utf8'));
-  } catch {
-    return null;
-  }
-};
 
 for (let step = 0; step < 300; step++) {
   const next = /next: (.*)/.exec((await code('journal.mjs', 'status')).text)?.[1] ?? '';
@@ -48,12 +40,13 @@ for (let step = 0; step < 300; step++) {
   } else if (next.startsWith('start.mjs')) {
     if ((await code('start.mjs', next.split(' ')[1])).status !== 0) process.exit(1);
   } else if (/^settle\.mjs \w+ pay/.test(next)) {
+    // no judgement of its own: settle decides in code; what it will not pay goes to the owner
     const batch = next.split(' ')[1];
-    const t = readJson(join(out, 'state', `current-${batch}.json`));
-    const onFile = readJson(process.env.STATE_FILE)?.ACCOUNT_ON_FILE;
-    const odd = t.payout?.account !== onFile || /approv|instead|account/i.test(JSON.stringify(t.booking));
-    const r = odd && batch === 'run' ? await code('settle.mjs', 'run', 'flag', 'not a plain payout to the account on file') : await code('settle.mjs', batch, 'pay');
-    if (r.status === 1 && batch === 'run' && /NOT PAID/.test(r.text)) await code('settle.mjs', 'run', 'flag', 'not paid by the rules');
+    const r = await code('settle.mjs', batch, 'pay');
+    if (r.status === 1 && /NOT PAID/.test(r.text)) {
+      if (batch !== 'run') break;
+      await code('settle.mjs', 'run', 'flag', 'not paid by the rules');
+    }
   } else if (/^settle\.mjs \w+ answer/.test(next)) {
     await code('settle.mjs', next.split(' ')[1], 'answer');
   } else if (next.includes('parked.mjs')) {
