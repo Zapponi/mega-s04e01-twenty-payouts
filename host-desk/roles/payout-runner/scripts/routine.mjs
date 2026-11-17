@@ -150,6 +150,7 @@ async function flagOwner(n, key, tok, why) {
     if (events().some((e) => e.key === key && ['moved', 'uncertain', 'sent'].includes(e.status))) stop(`flag of task ${n} not sent (${r.refused}) after its payout was tried; never paid again. Tell the human.`);
     journal({ key, status: 'not_sent', step: 'flag', why: r.refused });
     release(key, 'act');
+    release(key, 'flag'); // proven not sent (refused before any request): a restart may send it (Sol re-review 2 P2)
     stop(`flag of task ${n} not sent: ${r.refused}`);
   }
   if (!(r.status >= 200 && r.status < 300)) {

@@ -572,6 +572,21 @@ test('routine: two recoveries at once after a crash send the owner flag once (So
   assert.equal(pays().filter((h) => h.body.task === token('run', 1)).length, 1);
 });
 
+test('routine: a flag refused before any request releases its claim; the restart sends it once (Sol re-review 2 P2)', async () => {
+  fake.reset({ runTasks: 2, over: { 1: { payout: { account: 'acct_other0001' } } } });
+  await openRun();
+  env.DENY_URLS = `${fake.base}/run`;
+  const r1 = await run('routine.mjs', 'run');
+  delete env.DENY_URLS;
+  assert.match(r1.out, /flag of task 1 not sent/);
+  assert.equal(fake.hits.filter((h) => h.body.flag).length, 0);
+  const r2 = await run('routine.mjs', 'run');
+  assert.equal(r2.code, 0, r2.out);
+  assert.match(r2.out, /answered \[2\]; flagged for the owner \[1\]/);
+  assert.equal(fake.hits.filter((h) => h.body.flag).length, 1);
+  assert.equal(pays().length, 1, 'only task 2 paid');
+});
+
 test('routine: a hung payout late in the batch waits only until the deadline minus the flag reserve (Sol #3)', async () => {
   fake.reset({ runTasks: 4, runLimitMs: 3000, payoutDelayFor: { 3: 6000 } });
   await openForRoutine();
