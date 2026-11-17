@@ -27,6 +27,7 @@ export async function startFake() {
       this.verifyReply = opts.verifyReply ?? null; // a 200 reply to the key check other than ok
       this.replyDelay = opts.replyDelay ?? {}; // 'POST /run' → ms: processed at once, answered late
       this.attempts = 0;
+      this.connections = 0;
     },
     task(batch, n) {
       const o = batch === 'run' ? this.over[n] ?? {} : {};
@@ -97,6 +98,7 @@ export async function startFake() {
       json(404, { error: 'no route' });
     });
   });
+  f.server.on('connection', () => f.connections++); // TCP connections opened by clients (keep-alive check)
   await new Promise((r) => f.server.listen(0, '127.0.0.1', r));
   f.base = `http://localhost:${f.server.address().port}`;
   f.server.unref();

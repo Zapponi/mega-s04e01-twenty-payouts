@@ -28,8 +28,8 @@ const code = (file, ...args) =>
     });
   });
 
-// A model takes 1.2 s or more per turn (lab runs 2026-11-17: 1.3–2.3 s per task); 300 ms between steps keeps the
-// runner's kill after task 7 at a turn boundary, as with a model, instead of in the middle of the next payout.
+// A model takes 1.2 s or more per turn (lab runs 2026-11-17); 300 ms between steps stands for that thinking time
+// between the agent's own steps (status, routine, parked); the batch itself runs inside routine.mjs.
 const THINK_MS = Number(process.env.DRY_THINK_MS || 300);
 for (let step = 0; step < 300; step++) {
   await new Promise((r) => setTimeout(r, THINK_MS));
@@ -41,18 +41,13 @@ for (let step = 0; step < 300; step++) {
     if (r.status !== 200) process.exit(1);
   } else if (next.startsWith('check-key')) {
     if ((await code('check-key.mjs')).status !== 0) process.exit(1);
-  } else if (next.startsWith('start.mjs')) {
-    if ((await code('start.mjs', next.split(' ')[1])).status !== 0) process.exit(1);
-  } else if (/^settle\.mjs \w+ pay/.test(next)) {
-    // no judgement of its own: settle decides in code; what it will not pay goes to the owner
-    const batch = next.split(' ')[1];
-    const r = await code('settle.mjs', batch, 'pay');
-    if (r.status === 1 && /NOT PAID/.test(r.text)) {
-      if (batch !== 'run') break;
-      await code('settle.mjs', 'run', 'flag', 'not paid by the rules');
+  } else if (next.startsWith('routine.mjs')) {
+    // no judgement of its own: the routine decides every task in code, in one run
+    const r = await code('routine.mjs', next.split(' ')[1]);
+    if (r.status !== 0 && !/parked\.mjs/.test(r.text)) {
+      const after = /next: (.*)/.exec((await code('journal.mjs', 'status')).text)?.[1] ?? '';
+      if (after.startsWith('routine.mjs')) break; // it stopped on the same step: never loop on it
     }
-  } else if (/^settle\.mjs \w+ answer/.test(next)) {
-    await code('settle.mjs', next.split(' ')[1], 'answer');
   } else if (next.includes('parked.mjs')) {
     let r;
     do r = await code('parked.mjs');

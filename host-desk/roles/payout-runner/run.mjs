@@ -175,7 +175,7 @@ const MAX_SESSIONS = Number(process.env.MAX_SESSIONS || 3);
 let code = await session();
 for (let k = 2; day && k <= MAX_SESSIONS; k++) {
   const next = await status();
-  if (/^stop:/.test(next) || !/fetch the manual|parked\.mjs|settle\.mjs \w+ (pay|answer)|start\.mjs|check-key/.test(next)) break;
+  if (/^stop:/.test(next) || !/fetch the manual|parked\.mjs|routine\.mjs|settle\.mjs \w+ (pay|answer)|start\.mjs|check-key/.test(next)) break;
   const note = `\n[supervisor] the model stopped, but journal status says: ${mask(next)}. Starting session ${k} of ${MAX_SESSIONS}.\n`;
   process.stdout.write(note);
   runLog.write(note);

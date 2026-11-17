@@ -123,10 +123,14 @@ export function checks({ records, journal = [], manualText = '', checkLane = [],
     worst = Math.max(worst, took);
     if (took > limit) late.push(`${n} (${took} ms > ${limit} ms)`);
   }
-  const runEnd = Date.parse(m.first.res?.deadline ?? m.first.res?.expiresAt ?? m.first.res?.endsAt ?? '');
-  const lastAnswer = writes.filter((w) => ['answer', 'flag'].includes(w.kind)).at(-1);
-  if (Number.isFinite(runEnd) && lastAnswer && Date.parse(lastAnswer.time) > runEnd) late.push(`last answer after the run deadline ${m.first.res.deadline ?? m.first.res.expiresAt ?? m.first.res.endsAt}`);
-  add('M2', tasks.size > 0 && late.length === 0, `${tasks.size} task(s) timed; slowest ${worst} ms from arrival to answer/flag; late or unanswered: ${list(late)}`);
+  // The run's limit is for the whole batch: runLimitMs from the reply that opened it (real run 2026-11-17: 6000, and
+  // task 2 came with 184 ms left). Every accepted answer and flag must leave before open + runLimitMs.
+  const runLimit = m.first.res?.runLimitMs;
+  const runEnd = Number.isFinite(runLimit) ? Date.parse(m.first.time) + runLimit : Date.parse(m.first.res?.deadline ?? m.first.res?.expiresAt ?? m.first.res?.endsAt ?? '');
+  const accepted = writes.filter((w) => ['answer', 'flag'].includes(w.kind) && ok2(w) && !refusal(w));
+  for (const w of accepted) if (Number.isFinite(runEnd) && Date.parse(w.time) > runEnd) late.push(`${w.n} (${Date.parse(w.time) - runEnd} ms after the run limit)`);
+  const usedMs = accepted.length ? Date.parse(accepted.at(-1).time) - Date.parse(m.first.time) : NaN;
+  add('M2', tasks.size > 0 && late.length === 0, `run limit ${runLimit ?? '?'} ms; last accepted answer/flag ${Number.isFinite(usedMs) ? usedMs : '?'} ms after the open; ${tasks.size} task(s) timed, slowest ${worst} ms from arrival; late or unanswered: ${list([...new Set(late)])}`);
 
   // M3: an owner task gets no write after the flag before its decision shows in /parked, and is finished after it.
   const m3 = [];

@@ -1,5 +1,5 @@
 // The lab (plan.md § 4, lab/EXPECTED.md) without a model: the scripted agent runs the whole scenario against the mock,
-// killed after task 7 and restarted, and the lab checks pass; each check fails on the fault it exists for.
+// in one routine run with the run-wide clock (6 s), and the lab checks pass; each check fails on the fault it exists for.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
@@ -36,7 +36,7 @@ before(async () => {
     journal: jsonl(join(out, 'journal/journal.jsonl')),
     texts,
     secrets: [...Object.values(LAB_VARS), ...Object.entries(st).filter(([k]) => /^(ATTEMPT|VERIFY_PATH|CUR_TASK|TASK_[A-Z]+_\d+)(_PREV_\d+)?$/.test(k)).map(([, v]) => v)],
-    kill: JSON.parse(readFileSync(join(out, 'kill.json'), 'utf8')),
+    kill: null,
   };
 });
 
@@ -44,9 +44,9 @@ const clone = () => structuredClone(base);
 const res = (input, id) => labChecks(input).find((r) => r.id === id);
 const later = (e, ms) => ({ ...e, t: new Date(Date.parse(e.t) + ms).toISOString() });
 
-test('the scripted agent passes every lab check, with the kill after task 7', () => {
+test('the scripted agent passes every lab check: the whole run in one routine, inside the 6 s run limit', () => {
   for (const r of labChecks(base)) assert.ok(r.ok, `${r.id}: ${r.detail}`);
-  assert.equal(base.kill.afterN, 7);
+  assert.match(labChecks(base).find((r) => r.id === 'L.M2').detail, /run limit 6000 ms/);
   assert.ok(base.secrets.length > 20, 'tokens and the verify path are searched');
 });
 
@@ -81,8 +81,8 @@ test('L.M1 and L.M2 fail on a missing or a late answer', () => {
   c.truth = c.truth.filter((e) => !(e.ev === 'answer' && e.batch === 'run' && e.n === 11));
   assert.match(res(c, 'L.M1').detail, /11 finished 0 times/);
   const l = clone();
-  l.truth.find((e) => e.ev === 'answer' && e.batch === 'run' && e.n === 10).tookMs = 5200;
-  assert.match(res(l, 'L.M2').detail, /10: 5200 ms > 5000 ms/);
+  const a = l.truth.find((e) => e.ev === 'answer' && e.batch === 'run' && e.n === 10); a.t = new Date(Date.parse(l.truth.find((e) => e.ev === 'open' && e.batch === 'run').deadline) + 200).toISOString();
+  assert.match(res(l, 'L.M2').detail, /task 10 answered\/flagged 200 ms after the deadline/);
 });
 
 test('L.M7 fails when the need is not in the journal or task 20 is retried; L.M5 on a leaked value', () => {
