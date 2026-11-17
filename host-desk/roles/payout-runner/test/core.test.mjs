@@ -27,7 +27,7 @@ beforeEach(() => {
     PATH: process.env.PATH, HOME: process.env.HOME,
     VARS_FILE: join(tmp, 'vars.json'), STATE_FILE: join(dir, 'state', 'vars.json'), LOG_DIR: join(dir, 'logs'), JOURNAL_DIR: join(dir, 'journal'),
     ALLOWED_HOSTS: 'localhost', API_BASE: fake.base, PAYOUTS_URL: `${fake.base}/payouts`, VERIFY_BASE: `${fake.base}/verify`,
-    MANUAL_URL: `${fake.base}/manual`, MANUAL_ONCE: '1', SETTLE_TIMEOUT_MS: '500', PARKED_POLL_MS: '40', PARKED_MAX_MS: '400', ALLOW_RUN: '1', RUN_ID: 'test',
+    MANUAL_URL: `${fake.base}/manual`, MANUAL_ONCE: '1', SETTLE_TIMEOUT_MS: '4000', PARKED_POLL_MS: '40', PARKED_MAX_MS: '1500', ALLOW_RUN: '1', RUN_ID: 'test',
   };
   mkdirSync(dirname(env.STATE_FILE), { recursive: true });
 });
@@ -188,7 +188,7 @@ test('a late payout in /parked is uncertain: no answer, and the next call never 
   await openRun();
   await run('settle.mjs', 'run', 'flag', 'other account');
   fake.parked.set(1, 'new');
-  fake.payoutDelayMs = 1500; // longer than SETTLE_TIMEOUT_MS
+  fake.payoutDelayMs = 6000; // longer than SETTLE_TIMEOUT_MS (4000)
   const p = await run('parked.mjs');
   assert.equal(p.code, 3, p.out);
   assert.match(p.out, /UNCERTAIN payout for task 1/);
@@ -340,7 +340,7 @@ test('a flag whose reply is lost blocks any payout of that task', async () => {
   fake.reset({ runTasks: 2, over: { 1: { payout: { account: 'acct_other0001' } } } });
   await openRun();
   // the flag lands, but its reply comes after the 500 ms timeout
-  fake.replyDelay = { 'POST /run': 900 };
+  fake.replyDelay = { 'POST /run': 6000 };
   const f = await run('settle.mjs', 'run', 'flag', 'other account');
   fake.replyDelay = {};
   assert.match(f.out, /FLAG UNCLEAR/);
@@ -354,7 +354,7 @@ test('a flag whose reply is lost blocks any payout of that task', async () => {
 test('a lost flag that did land is still finished by parked once the owner decides (Sol A #3)', async () => {
   fake.reset({ runTasks: 2, over: { 1: { payout: { account: 'acct_other0001' } } } });
   await openRun();
-  fake.replyDelay = { 'POST /run': 900 };
+  fake.replyDelay = { 'POST /run': 6000 };
   assert.match((await run('settle.mjs', 'run', 'flag', 'other account')).out, /FLAG UNCLEAR/);
   fake.replyDelay = {};
   assert.equal(fake.parked.get(1), null, 'the flag landed; the owner has not decided');
@@ -383,7 +383,7 @@ test('after a crash, the answer goes out with the task\'s own token, not the nex
 test('an open whose reply is lost is never sent again (Sol A #2)', async () => {
   await fetchManual();
   assert.equal((await run('check-key.mjs')).code, 0);
-  fake.replyDelay = { 'POST /run': 900 };
+  fake.replyDelay = { 'POST /run': 6000 };
   const s1 = await run('start.mjs', 'run');
   fake.replyDelay = {};
   assert.match(s1.out, /ERROR/);
@@ -416,6 +416,12 @@ test('the same booking and amount under another task number is not paid again (S
   assert.equal((await run('settle.mjs', 'run', 'pay')).code, 0);
   const r = await run('settle.mjs', 'run', 'pay');
   assert.match(r.out, /NOT PAID, task 2: booking BK-1001 .* already sent/);
+  assert.equal(pays().length, 1);
+  // flagged, and the owner says on-file: still not paid twice; the human is told (Sol re-review #1)
+  await run('settle.mjs', 'run', 'flag', 'same booking as task 1');
+  fake.parked.set(2, 'on-file');
+  const p = await run('parked.mjs');
+  assert.match(p.out, /STOPPED task 2: booking BK-1001 .* already sent/);
   assert.equal(pays().length, 1);
 });
 

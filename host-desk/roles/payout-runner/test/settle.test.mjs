@@ -63,7 +63,7 @@ beforeEach(() => {
   env = {
     PATH: process.env.PATH, HOME: process.env.HOME,
     VARS_FILE: join(tmp, 'vars.json'), STATE_FILE: join(dir, 'state', 'vars.json'), LOG_DIR: join(dir, 'logs'), JOURNAL_DIR: join(dir, 'journal'),
-    ALLOWED_HOSTS: 'localhost', API_BASE: base, PAYOUTS_URL: `${base}/payouts`, SETTLE_TIMEOUT_MS: '500', ALLOW_RUN: '1', RUN_ID: 'test',
+    ALLOWED_HOSTS: 'localhost', API_BASE: base, PAYOUTS_URL: `${base}/payouts`, SETTLE_TIMEOUT_MS: '4000', ALLOW_RUN: '1', RUN_ID: 'test',
   };
   mkdirSync(dirname(env.STATE_FILE), { recursive: true });
   writeFileSync(env.STATE_FILE, JSON.stringify({ ATTEMPT: 'att_FAKE_secret_attempt', ATTEMPT_SEEN_AT: '2026-11-16T00:00:00Z', ACCOUNT_ON_FILE: ON_FILE }));
@@ -161,7 +161,7 @@ test('practice has no flag route', async () => {
 });
 
 test('a late payout is uncertain: no answer, never sent again', async () => {
-  mode.payoutDelayMs = 1500; // longer than SETTLE_TIMEOUT_MS
+  mode.payoutDelayMs = 6000; // longer than SETTLE_TIMEOUT_MS (4000)
   await run('start.mjs', 'practice');
   const r = await run('settle.mjs', 'practice', 'pay');
   assert.equal(r.code, 3, r.out);

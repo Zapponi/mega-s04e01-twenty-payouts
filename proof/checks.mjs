@@ -114,7 +114,7 @@ export function checks({ records, journal = [], manualText = '', checkLane = [],
   for (const [n, t] of tasks) {
     const limit = t.timeLeftMs ?? t.runLimitMs;
     // the answer or flag the course accepted (2xx), not a first try that failed (Sol review A #4)
-    const w = writes.find((x) => x.n === n && ['answer', 'flag'].includes(x.kind) && x.i > t.i && ok2(x));
+    const w = writes.find((x) => x.n === n && ['answer', 'flag'].includes(x.kind) && x.i > t.i && ok2(x) && !refusal(x));
     if (!w || !Number.isFinite(limit)) {
       late.push(`${n} (${w ? 'no time shown' : 'never answered or flagged'})`);
       continue;

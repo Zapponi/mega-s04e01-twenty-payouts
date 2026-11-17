@@ -83,6 +83,10 @@ async function act(n, decision, entry, seenAt) {
   if (typeof account !== 'string' || !ACCOUNT.test(account)) return stop(n, `no structured account to pay (${JSON.stringify(account)})`);
   const a = amountOf(task.booking);
   if (!a.ok) return stop(n, a.why);
+  // A booking and amount already sent under another task number is never paid twice, even after an owner's "yes":
+  // the human hears of it instead (Sol re-review #1).
+  const again = events().find((e) => e.status === 'sent' && e.key !== key && e.key?.endsWith(`:${st.ATTEMPT_SEEN_AT}`) && e.bookingId === task.booking?.id && e.amount === a.amount);
+  if (again) return stop(n, `booking ${task.booking?.id} for ${a.amount} EUR was already sent as ${again.key.split(':').slice(0, 2).join(' ')}`);
   if (!claim(key, 'owner-pay')) return say(`task ${n} is already being paid by another run: nothing sent.`);
   journal({ key, status: 'sent', amount: a.amount, nights: a.nights, account, decision, bookingId: task.booking?.id });
   const p = await send({

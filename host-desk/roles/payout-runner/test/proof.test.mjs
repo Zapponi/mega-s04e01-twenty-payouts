@@ -20,7 +20,7 @@ const env = {
   PATH: process.env.PATH, HOME: process.env.HOME,
   VARS_FILE: join(tmp, 'vars.json'), STATE_FILE: join(tmp, 'state', 'vars.json'), LOG_DIR: join(tmp, 'logs'), JOURNAL_DIR: join(tmp, 'journal'),
   ALLOWED_HOSTS: 'localhost', API_BASE: fake.base, PAYOUTS_URL: `${fake.base}/payouts`, VERIFY_BASE: `${fake.base}/verify`,
-  MANUAL_URL: `${fake.base}/manual`, MANUAL_ONCE: '1', SETTLE_TIMEOUT_MS: '500', PARKED_POLL_MS: '40', PARKED_MAX_MS: '400', ALLOW_RUN: '1', RUN_ID: 'proof',
+  MANUAL_URL: `${fake.base}/manual`, MANUAL_ONCE: '1', SETTLE_TIMEOUT_MS: '4000', PARKED_POLL_MS: '40', PARKED_MAX_MS: '1500', ALLOW_RUN: '1', RUN_ID: 'proof',
 };
 mkdirSync(dirname(env.STATE_FILE), { recursive: true });
 const node = (args) =>
@@ -99,6 +99,11 @@ test('M2 measures the answer the course accepted, not a failed first try (Sol A 
   c.records[i + 1] = { ...ok, time: new Date(Date.parse(ok.time) + 9000).toISOString() }; // accepted 9 s later
   assert.equal(result(c, 'M2').ok, false);
   assert.match(result(c, 'M2').detail, /late or unanswered: 1 \(/);
+  // a 200 that says refused is not an accepted answer either (Sol re-review #2)
+  const r = clone();
+  const j = find(r.records, (x, b) => x.url.endsWith('/run') && b?.answer !== undefined);
+  r.records[j] = { ...r.records[j], resBody: '{"status":"refused","reason":"late"}' };
+  assert.match(result(r, 'M2').detail, /1 \(never answered or flagged\)/);
 });
 
 test('M3 fails when an owner task was paid before its decision showed in /parked', () => {
