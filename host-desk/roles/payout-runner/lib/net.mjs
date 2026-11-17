@@ -74,6 +74,9 @@ export function mask(text, vars = loadVars()) {
   return s;
 }
 
+/** Every absolute URL in s keeps its scheme and host; its path, query and fragment become <redacted>. */
+export const redactPaths = (s) => String(s ?? '').replace(/(https?:\/\/[^/\s"'\\]+)[/?#][^\s"'\\]*/g, '$1/<redacted>');
+
 const sameUrl = (a, b) => {
   try {
     const x = new URL(a);
@@ -238,7 +241,10 @@ export async function send({ method = 'GET', url, headers = {}, body, caller = '
         if (!opts.vars) vars = loadVars();
       }
     }
-    const text = mask(raw, vars);
+    // A redirect's address may carry a token we hold no name for (real run 2: 307 to cdn-s04.mega.dev/<token>/payouts).
+    // Keep only the host in what is logged, kept or returned; following a GET reads the real header below.
+    const redirect = res.status >= 300 && res.status < 400;
+    const text = mask(redirect ? redactPaths(raw) : raw, vars);
     // A script keeps the reply (the next task) before anything else can fail, so a crash right after a send never
     // leaves the next task unknown (Sol review A #1).
     if (opts.keep && res.status >= 200 && res.status < 300) {
@@ -247,6 +253,7 @@ export async function send({ method = 'GET', url, headers = {}, body, caller = '
       } catch {}
     }
     const resHeaders = maskHeaders(Object.fromEntries(res.headers), vars);
+    if (redirect && resHeaders.location) resHeaders.location = redactPaths(resHeaders.location);
     log(cfg, {
       ...base,
       hop,

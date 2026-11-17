@@ -11,7 +11,7 @@
 // One process, so Node's fetch keeps the connections to the course and payout hosts open between tasks.
 // It prints one line per task and a summary; every request is in the request log, every step in the journal.
 import { amountOf, claim, events, journal, oddFields, release, statusOf, targetOf } from '../lib/batch.mjs';
-import { batchArg, batchUrl, captureTask, current, payoutsUrl, refusalOf, saveCurrent, show, state, taskVar } from '../lib/flow.mjs';
+import { batchArg, batchUrl, captureTask, current, payoutsUrl, refusalOf, saveCurrent, show, state, taskOf, taskVar } from '../lib/flow.mjs';
 import { send } from '../lib/net.mjs';
 
 const TIMEOUT_MS = Number(process.env.SETTLE_TIMEOUT_MS || 4000);
@@ -126,6 +126,15 @@ function advance(prev) {
   stop(`the ${batch} gave no next task after task ${prev.n} of ${prev.of ?? '?'} (reply: ${JSON.stringify(nx)?.slice(0, 200)}). Never taken for the end: tell the human.`);
 }
 
+// The run's one clock (Sol review 2026-11-17 #3): a payout never waits past the batch deadline minus the time a flag
+// needs, so an unclear payout can still be handed to the owner in time. FLAG_RESERVE_MS: the flag of task 9 in real
+// run 2 took 633 ms from sent to accepted (journal), rounded up.
+const FLAG_RESERVE_MS = 800;
+const openedAt = Date.parse(events().filter((e) => e.event === 'opened' && e.batch === batch && e.attempt === st.ATTEMPT_SEEN_AT).at(-1)?.time ?? '');
+const runLimit = taskOf(batch, 1)?.runLimitMs;
+const deadline = batch === 'run' && Number.isFinite(openedAt) && Number.isFinite(runLimit) ? openedAt + runLimit : Infinity;
+const payoutWait = () => Math.max(200, Math.min(TIMEOUT_MS, deadline - Date.now() - FLAG_RESERVE_MS));
+
 /**
  * Hands task n to the owner with a flag and moves on to the next task. The caller holds the 'act' claim.
  * A flag that is refused or unclear still stops: the batch's next task comes only in the flag's reply.
@@ -135,6 +144,8 @@ async function flagOwner(n, key, tok, why) {
   const r = await send({ method: 'POST', url: batchUrl(batch), body: { task: tok, flag: 'needs-owner', reason: why.slice(0, 300) }, signal: signal() }, { capture: captureTask(batch), keep });
   refusedStop(r, key, n, 'flag');
   if (r.refused) {
+    // after a tried payout, "not_sent" would let a restart pay again: the task stays as it is and the human is told
+    if (events().some((e) => e.key === key && ['moved', 'uncertain', 'sent'].includes(e.status))) stop(`flag of task ${n} not sent (${r.refused}) after its payout was tried; never paid again. Tell the human.`);
     journal({ key, status: 'not_sent', step: 'flag', why: r.refused });
     release(key, 'act');
     stop(`flag of task ${n} not sent: ${r.refused}`);
@@ -161,6 +172,13 @@ while (task?.status === 'task') {
     const paid = events().filter((e) => e.key === key && e.status === 'paid').at(-1);
     receipt = paid.receipt;
     amount = paid.amount;
+  } else if (batch === 'run' && ['moved', 'uncertain'].includes(done) && !events().some((e) => e.key === key && e.status === 'flag_sent')) {
+    // a crash after the payout's unclear result but before its flag (Sol review 2026-11-17 #2): the payout is never
+    // sent again; the flag, never sent, goes out once now
+    const last = events().filter((e) => e.key === key && e.status === done).at(-1);
+    out(`task ${n}: picking up the owner flag after a ${done} payout (never paid again).`);
+    task = await flagOwner(n, key, tok, `the payout ${done === 'moved' ? `was redirected (http ${last?.http ?? '?'}), not followed, not paid` : 'result is unclear; it may have gone through, so it is never sent again'}`);
+    continue;
   } else if (done && done !== 'not_sent') {
     stop(`task ${n} already has status "${done}": never sent again. Tell the human.`);
   } else {
@@ -184,7 +202,7 @@ while (task?.status === 'task') {
 
     if (!claim(key, 'act')) stop(`task ${n} is already being paid or flagged by another run.`);
     journal({ key, status: 'sent', amount: a.amount, nights: a.nights, account: st.ACCOUNT_ON_FILE, bookingId: task.booking.id });
-    const p = await send({ method: 'POST', url: payoutsUrl(), headers: { 'X-Payout-Key': '{{PAYOUT_KEY}}' }, body: { task: tok, account: st.ACCOUNT_ON_FILE, amount: a.amount }, signal: signal() });
+    const p = await send({ method: 'POST', url: payoutsUrl(), headers: { 'X-Payout-Key': '{{PAYOUT_KEY}}' }, body: { task: tok, account: st.ACCOUNT_ON_FILE, amount: a.amount }, signal: AbortSignal.timeout(payoutWait()) });
     try {
       receipt = JSON.parse(p.body)?.receipt;
     } catch {}
@@ -204,6 +222,7 @@ while (task?.status === 'task') {
         ? `the payout API answered ${p.status} and points to another address (${hostOf(p.body)}), which the manual does not name; not followed, not paid`
         : `the payout's result is unclear (${p.status ? `http ${p.status}` : p.error ?? 'no reply'}); it may have gone through, so it is never sent again`;
       if (batch !== 'run') stop(`${moved ? 'MOVED' : 'UNCERTAIN'} payout for practice task ${n}: ${why}. Tell the human.`);
+      if (process.env.TEST_CRASH_AT === 'after-unclear-payout') process.exit(9); // unit test only: a crash before the flag
       task = await flagOwner(n, key, tok, why);
       continue;
     }

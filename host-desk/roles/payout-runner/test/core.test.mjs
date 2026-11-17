@@ -535,12 +535,56 @@ test('routine: a 307 on a payout is never followed; the task goes to the owner a
   assert.equal(pays().filter((h) => h.body.task === token('run', 3)).length, 1, 'the payout of task 3 sent once, never again');
   assert.ok(journal().some((e) => e.key?.startsWith('run:3:') && e.status === 'moved'));
   assert.ok(!r.out.includes('SECRETTOKENPATH123'), 'the redirect path is not printed');
+  assert.ok(!filesText().includes('SECRETTOKENPATH123'), 'nor in the request log or the journal (Sol review 2026-11-17 #1)');
+  assert.match(filesText(), /cdn-s04\.mega\.dev\/<redacted>/);
   // the owner says on-file: parked never sends that payout again; decline finishes it
   fake.parked.set(3, 'on-file');
   const p = await run('parked.mjs');
   assert.match(p.out, /STOPPED task 3: a payout was already tried for this task \(moved, http 307\)/);
   assert.equal(pays().filter((h) => h.body.task === token('run', 3)).length, 1);
   assert.equal(parkedPosts().length, 0);
+});
+
+test('routine: a crash after a 307 payout and before its flag: the restart flags once, never pays again, goes on (Sol #2)', async () => {
+  fake.reset({ runTasks: 3, payoutStatus: { 1: MOVED } });
+  await openForRoutine();
+  env.TEST_CRASH_AT = 'after-unclear-payout';
+  const r1 = await run('routine.mjs', 'run');
+  delete env.TEST_CRASH_AT;
+  assert.equal(r1.code, 9, r1.out);
+  assert.equal(fake.hits.filter((h) => h.body.flag).length, 0, 'the crash came before the flag');
+  const r2 = await run('routine.mjs', 'run');
+  assert.equal(r2.code, 0, r2.out);
+  assert.match(r2.out, /task 1: picking up the owner flag after a moved payout/);
+  assert.match(r2.out, /answered \[2,3\]; flagged for the owner \[1\]/);
+  assert.equal(pays().filter((h) => h.body.task === token('run', 1)).length, 1, 'task 1 payout tried once');
+  assert.equal(fake.hits.filter((h) => h.body.flag).length, 1);
+});
+
+test('routine: a hung payout late in the batch waits only until the deadline minus the flag reserve (Sol #3)', async () => {
+  fake.reset({ runTasks: 4, runLimitMs: 3000, payoutDelayFor: { 3: 6000 } });
+  await openForRoutine();
+  env.SETTLE_TIMEOUT_MS = '10000'; // the script's own cap would wait 10 s: the batch clock must cut it
+  const r = await run('routine.mjs', 'run');
+  env.SETTLE_TIMEOUT_MS = '4000';
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /answered \[1,2,4\]; flagged for the owner \[3\]/);
+  const open = fake.hits.find((h) => h.path === '/run' && h.body.attempt).time;
+  const flag = fake.hits.find((h) => h.body.flag).time;
+  const last = Math.max(...fake.hits.filter((h) => h.path === '/run' && (h.body.answer !== undefined || h.body.flag)).map((h) => h.time));
+  assert.ok(flag - open < 3000, `flag of task 3 sent ${flag - open} ms after the open, inside 3000`);
+  assert.ok(last - open < 3000, `last answer ${last - open} ms after the open, inside 3000`);
+});
+
+test('NEW_ATTEMPT from a launcher refused by the lock leaves the attempt open (Sol #4)', { skip: process.platform === 'win32' }, async () => {
+  const lab = join(dir, 'lab');
+  mkdirSync(join(lab, 'state'), { recursive: true });
+  const st = { ATTEMPT: 'att_x', ATTEMPT_SEEN_AT: new Date().toISOString(), ATTEMPT_EXPIRES_AT: new Date(Date.now() + 3_600_000).toISOString() };
+  writeFileSync(join(lab, 'state', 'vars.json'), JSON.stringify(st));
+  writeFileSync(join(lab, 'state', 'run.lock'), String(process.pid));
+  const r = await runMjs({ ...fakePi(), MODE: 'lab', LAB_URL: fake.base, LAB_OUT: lab, NEW_ATTEMPT: '1' });
+  assert.equal(r.code, 1, r.out);
+  assert.equal(JSON.parse(readFileSync(join(lab, 'state', 'vars.json'), 'utf8')).ATTEMPT_CLOSED_AT, undefined);
 });
 
 test('routine: a 307 task the owner declines is finished as declined by parked', async () => {
