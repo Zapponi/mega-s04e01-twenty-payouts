@@ -161,6 +161,8 @@ test('code tool output is masked before the model sees it', async () => {
   const name = `_test-echo-${process.pid}.mjs`;
   mkdirSync(scripts, { recursive: true });
   writeFileSync(join(scripts, name), 'console.log("t=" + process.env.TICKET); console.error("k=" + process.env.PAYOUT_KEY); console.log("ro=" + (process.env.ALLOWED_HOSTS ?? ""));');
+  const { ALLOWED } = await import('../extensions/code.mjs');
+  ALLOWED.add(name);
   try {
     const r = await tools.code.execute('1', { file: name });
     const text = r.content[0].text;
@@ -171,6 +173,30 @@ test('code tool output is masked before the model sees it', async () => {
   } finally {
     rmSync(join(scripts, name), { force: true });
   }
+});
+
+test('the code tool runs only the day\'s scripts: open-practice.mjs (real host) is refused', async () => {
+  const r = await tools.code.execute('1', { file: 'open-practice.mjs', args: ['--again'] });
+  assert.match(r.content[0].text, /No such file in scripts\/: open-practice\.mjs/);
+  assert.equal(r.details.failed, true);
+});
+
+test('a manual URL with a query is still the manual: closed by DENY_URLS and MANUAL_ONCE', async () => {
+  const { refusal } = await import('../lib/net.mjs');
+  const cfg = { allowedHosts: ['hq.mega.dev'], denyUrls: ['https://hq.mega.dev/m/manual'], writeUrls: [], manualUrl: 'https://hq.mega.dev/m/manual' };
+  assert.match(refusal({ method: 'GET', url: 'https://hq.mega.dev/m/manual?x=1', caller: 'model' }, cfg), /DENY_URLS/);
+  const once = { ...cfg, denyUrls: [], manualOnce: true, attemptOpenUntil: Date.now() + 60_000 };
+  assert.match(refusal({ method: 'GET', url: 'https://hq.mega.dev/m/manual/?a=b', caller: 'model' }, once), /already fetched/);
+});
+
+test('a redirect after a write is not followed: the write is not sent twice', async () => {
+  const { send: s } = await import('../lib/net.mjs');
+  hits = [];
+  const r = await s({ method: 'POST', url: `${base}/redirect-in`, body: { a: 1 } }, { cfg: { allowedHosts: ['localhost'], denyUrls: [], writeUrls: [`${base}/redirect-in`], logDir: join(tmp, 'logs'), runId: 'test' } });
+  assert.equal(hits.length, 1);
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not followed/);
+  assert.equal(r.refused, undefined, 'unclear, never "not sent"');
 });
 
 test('the attempt token from the manual is captured, masked, and usable as {{ATTEMPT}}', async () => {

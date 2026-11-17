@@ -4,7 +4,7 @@
 //   "Amounts are whole euros."  "Nights = the check-out date minus the check-in date."
 //   "A stay total is nights × nightly rate + cleaning fee."
 // and the append-only journal that keeps a task from being paid twice.
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -49,6 +49,28 @@ export function targetOf(task, accountOnFile) {
 export function journalFile(env = process.env) {
   const dir = env.JOURNAL_DIR ? resolve(env.JOURNAL_DIR) : join(ROOT, 'journal');
   return join(dir, `${env.JOURNAL_NAME || 'journal'}.jsonl`);
+}
+
+/**
+ * Claims one outside effect (a payout, a flag, a batch open) for a key, atomically: the first caller gets true, every
+ * later or concurrent one false, so two runs of a script can never both send it (Sol review B #4). A file per claim,
+ * created with 'wx', next to the journal.
+ */
+const claimFile = (key, step, env) => join(dirname(journalFile(env)), 'claims', `${String(key).replace(/[^A-Za-z0-9._-]/g, '_')}.${step}`);
+export function claim(key, step, env = process.env) {
+  const f = claimFile(key, step, env);
+  mkdirSync(dirname(f), { recursive: true });
+  try {
+    closeSync(openSync(f, 'wx'));
+    return true;
+  } catch (e) {
+    if (e.code === 'EEXIST') return false;
+    throw e;
+  }
+}
+/** Gives a claim back, only when nothing left this machine (the request layer refused it). */
+export function release(key, step, env = process.env) {
+  rmSync(claimFile(key, step, env), { force: true });
 }
 
 export function journal(event, env = process.env) {

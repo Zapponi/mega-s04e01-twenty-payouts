@@ -18,8 +18,8 @@ const r = await send({
   signal: AbortSignal.timeout(Number(process.env.SETTLE_TIMEOUT_MS || 4000)),
 });
 const ref = r.status ? refusalOf(r) : null;
-journal({ event: 'key_checked', attempt: st.ATTEMPT_SEEN_AT, http: r.status, ok: r.status >= 200 && r.status < 300, need: ref?.need, why: ref?.why ?? r.refused ?? r.error });
-if (r.status >= 200 && r.status < 300 && !ref?.need) {
+journal({ event: 'key_checked', attempt: st.ATTEMPT_SEEN_AT, http: r.status, ok: r.status >= 200 && r.status < 300 && !ref, need: ref?.need, why: ref?.why ?? r.refused ?? r.error });
+if (r.status >= 200 && r.status < 300 && !ref) {
   console.log(`KEY OK: ${show(r)}`);
   process.exit(0);
 }

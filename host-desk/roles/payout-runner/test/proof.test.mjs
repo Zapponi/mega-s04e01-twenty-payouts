@@ -91,6 +91,16 @@ test('M2 fails when an answer left after the time the task showed', () => {
   assert.match(result(c, 'M2').detail, /late or unanswered: 1 \(/);
 });
 
+test('M2 measures the answer the course accepted, not a failed first try (Sol A #4)', () => {
+  const c = clone();
+  const i = find(c.records, (r, b) => r.url.endsWith('/run') && b?.answer !== undefined);
+  const ok = c.records[i];
+  c.records.splice(i, 0, { ...ok, status: 503, resBody: '{"error":"busy"}' }); // a quick try that failed
+  c.records[i + 1] = { ...ok, time: new Date(Date.parse(ok.time) + 9000).toISOString() }; // accepted 9 s later
+  assert.equal(result(c, 'M2').ok, false);
+  assert.match(result(c, 'M2').detail, /late or unanswered: 1 \(/);
+});
+
 test('M3 fails when an owner task was paid before its decision showed in /parked', () => {
   const c = clone();
   const pay2 = find(c.records, (r, b) => r.url.endsWith('/payouts') && b?.task === '{{TASK_RUN_2}}');

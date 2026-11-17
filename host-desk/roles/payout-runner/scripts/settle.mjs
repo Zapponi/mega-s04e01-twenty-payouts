@@ -4,8 +4,9 @@
 // Every rule is checked here, not by the model. Anything off → no action, the reason is printed, the agent decides.
 // A payout whose result is unclear is journaled "uncertain" and never sent again by this script.
 // A refusal (a `need`, a status "refused", a 4xx) is journaled "refused" with its need; the task is never retried.
-import { amountOf, journal, oddFields, statusOf, events, targetOf } from '../lib/batch.mjs';
-import { batchArg, batchUrl, captureTask, current, payoutsUrl, refusalOf, saveCurrent, show, state } from '../lib/flow.mjs';
+// Pay and flag are one claimed effect per task (lib/batch.mjs claim): two runs at once can never both send.
+import { amountOf, claim, events, journal, oddFields, release, statusOf, targetOf } from '../lib/batch.mjs';
+import { batchArg, batchUrl, captureTask, current, payoutsUrl, refusalOf, saveCurrent, show, state, taskVar } from '../lib/flow.mjs';
 import { send } from '../lib/net.mjs';
 
 const TIMEOUT_MS = Number(process.env.SETTLE_TIMEOUT_MS || 4000);
@@ -18,7 +19,11 @@ if (!task || task.status !== 'task') {
   process.exit(1);
 }
 const key = `${batch}:${task.n}:${st.ATTEMPT_SEEN_AT}`;
+// This task's own token, never "the current one": after a crash CUR_TASK may already hold the next task's token
+// (Sol review A #1).
+const tok = st[taskVar(batch, task.n)] ? `{{${taskVar(batch, task.n)}}}` : '{{CUR_TASK}}';
 const left = () => `timeLeftMs at the task: ${task.timeLeftMs ?? '?'}`;
+const keep = (text) => saveCurrent(batch, text); // the next task is kept as soon as it arrives
 process.env.WRITE_URLS = [batchUrl(batch), payoutsUrl()].join(',');
 
 function refused(r, step) {
@@ -31,13 +36,12 @@ function refused(r, step) {
 
 async function answer(receipt, amount) {
   const r = await send(
-    { method: 'POST', url: batchUrl(batch), body: { task: '{{CUR_TASK}}', answer: amount, payout: receipt }, signal: AbortSignal.timeout(TIMEOUT_MS) },
-    { capture: captureTask(batch) },
+    { method: 'POST', url: batchUrl(batch), body: { task: tok, answer: amount, payout: receipt }, signal: AbortSignal.timeout(TIMEOUT_MS) },
+    { capture: captureTask(batch), keep },
   );
   refused(r, 'answer');
   if (r.status && r.status < 300) {
     journal({ key, status: 'answered', amount, receipt, http: r.status });
-    saveCurrent(batch, r.body);
     console.log(`ANSWERED task ${task.n}: ${amount} EUR, receipt kept. Next: ${show(r)}`);
     process.exit(0);
   }
@@ -60,6 +64,12 @@ if (done && done !== 'not_sent') {
   console.log(`Task ${task.n} already has status "${done}" in the journal: no second payout or flag. ${['uncertain', 'sent', 'flag_sent'].includes(done) ? 'Tell the human.' : ''}`);
   process.exit(1);
 }
+const take = () => {
+  if (!claim(key, 'act')) {
+    console.log(`Task ${task.n} is already being paid or flagged by another run: nothing sent. Run journal.mjs status.`);
+    process.exit(1);
+  }
+};
 
 if (action === 'flag') {
   const reason = String(process.argv[4] ?? '').slice(0, 300);
@@ -71,26 +81,27 @@ if (action === 'flag') {
     console.log('Give a short reason: settle run flag "<reason>".');
     process.exit(2);
   }
+  take();
   // Journaled before the send: a flag whose reply is lost may have landed, and then the task must never be paid.
   journal({ key, status: 'flag_sent', n: task.n, reason });
   const r = await send(
-    { method: 'POST', url: batchUrl(batch), body: { task: '{{CUR_TASK}}', flag: 'needs-owner', reason }, signal: AbortSignal.timeout(TIMEOUT_MS) },
-    { capture: captureTask(batch) },
+    { method: 'POST', url: batchUrl(batch), body: { task: tok, flag: 'needs-owner', reason }, signal: AbortSignal.timeout(TIMEOUT_MS) },
+    { capture: captureTask(batch), keep },
   );
   refused(r, 'flag');
   if (r.status && r.status < 300) {
     journal({ key, status: 'waiting_owner', n: task.n, reason, http: r.status });
-    saveCurrent(batch, r.body);
     console.log(`FLAGGED task ${task.n} for the owner. Next: ${show(r)}`);
     process.exit(0);
   }
   if (r.refused) {
     journal({ key, status: 'not_sent', step: 'flag', why: r.refused });
+    release(key, 'act');
     console.log(`FLAG not sent for task ${task.n}: ${show(r)}. Nothing left this machine.`);
     process.exit(3);
   }
   journal({ key, event: 'flag_failed', http: r.status, why: r.error });
-  console.log(`FLAG UNCLEAR for task ${task.n}: ${show(r)}. It may have landed: never pay this task; tell the human.`);
+  console.log(`FLAG UNCLEAR for task ${task.n}: ${show(r)}. It may have landed: never pay this task; parked.mjs finishes it if the owner decides it. Tell the human.`);
   process.exit(3);
 }
 
@@ -114,12 +125,19 @@ if (target !== 'on-file') {
   console.log(`NOT PAID, task ${task.n}: ${why}. Nothing was sent. In the run: settle run flag "<reason>".`);
   process.exit(1);
 }
-journal({ key, status: 'sent', amount: a.amount, nights: a.nights, account: st.ACCOUNT_ON_FILE });
+// The same booking and amount under another task number is a second payout of one stay (Sol review B #6).
+const again = events().find((e) => e.status === 'sent' && e.key !== key && e.key?.endsWith(`:${st.ATTEMPT_SEEN_AT}`) && e.bookingId === task.booking.id && e.amount === a.amount);
+if (again) {
+  console.log(`NOT PAID, task ${task.n}: booking ${task.booking.id} for ${a.amount} EUR was already sent as ${again.key.split(':').slice(0, 2).join(' ')}: the owner's call. Nothing was sent. In the run: settle run flag "<reason>".`);
+  process.exit(1);
+}
+take();
+journal({ key, status: 'sent', amount: a.amount, nights: a.nights, account: st.ACCOUNT_ON_FILE, bookingId: task.booking.id });
 const p = await send({
   method: 'POST',
   url: payoutsUrl(),
   headers: { 'X-Payout-Key': '{{PAYOUT_KEY}}' },
-  body: { task: '{{CUR_TASK}}', account: st.ACCOUNT_ON_FILE, amount: a.amount },
+  body: { task: tok, account: st.ACCOUNT_ON_FILE, amount: a.amount },
   signal: AbortSignal.timeout(TIMEOUT_MS),
 });
 let receipt;
@@ -130,10 +148,11 @@ if (!(p.status >= 200 && p.status < 300) || typeof receipt !== 'string' || !rece
   refused(p, 'payout');
   if (p.refused) {
     journal({ key, status: 'not_sent', step: 'payout', why: p.refused });
+    release(key, 'act');
     console.log(`NOT SENT, task ${task.n}: ${show(p)}. Nothing left this machine; fix the cause, then settle may try again.`);
     process.exit(3);
   }
-  journal({ key, status: 'uncertain', http: p.status, why: p.refused ?? p.error, body: p.body?.slice(0, 500) });
+  journal({ key, status: 'uncertain', http: p.status, why: p.error, body: p.body?.slice(0, 500) });
   console.log(`UNCERTAIN payout for task ${task.n}: ${show(p)}. It may or may not have gone through. Never send it again; tell the human. ${left()}`);
   process.exit(3);
 }

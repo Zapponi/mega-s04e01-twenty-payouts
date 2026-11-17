@@ -24,6 +24,8 @@ export async function startFake() {
       this.payoutDelayMs = opts.payoutDelayMs ?? 0;
       this.refuseAnswer = opts.refuseAnswer ?? null; // n → reply { code, body }
       this.flagReply = opts.flagReply ?? null; // a reply to a flag other than the next task
+      this.verifyReply = opts.verifyReply ?? null; // a 200 reply to the key check other than ok
+      this.replyDelay = opts.replyDelay ?? {}; // 'POST /run' → ms: processed at once, answered late
       this.attempts = 0;
     },
     task(batch, n) {
@@ -44,9 +46,14 @@ export async function startFake() {
     req.on('end', async () => {
       const b = body ? JSON.parse(body) : {};
       f.hits.push({ method: req.method, path: req.url, body: b, headers: req.headers, time: Date.now() });
+      // a request the fake processes at once but answers late (replyDelay: path → ms): it landed, its reply is lost
+      const late = f.replyDelay?.[`${req.method} ${req.url}`] ?? 0;
       const json = (code, o) => {
-        res.writeHead(code, { 'content-type': 'application/json' });
-        res.end(JSON.stringify(o));
+        const out = () => {
+          res.writeHead(code, { 'content-type': 'application/json' });
+          res.end(JSON.stringify(o));
+        };
+        late ? setTimeout(out, late) : out();
       };
       const auth = req.headers.authorization ?? '';
       if (req.method === 'GET' && req.url === '/manual') {
@@ -59,6 +66,7 @@ export async function startFake() {
       if (req.method === 'GET' && req.url.startsWith('/verify/')) {
         if (req.url !== `/verify/${VERIFY_SECRET}`) return json(404, { error: 'no such path' });
         if (req.headers['x-payout-key'] !== FAKE.PAYOUT_KEY) return json(401, { error: 'bad key', need: 'payout-key' });
+        if (f.verifyReply) return json(200, f.verifyReply);
         return json(200, { status: 'ok', message: 'The payout key works.' });
       }
       if (req.url === '/payouts') {

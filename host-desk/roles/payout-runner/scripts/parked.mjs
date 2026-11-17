@@ -7,7 +7,7 @@
 // parked answer <n> — re-send only the answer of a parked task already paid (receipt from the journal).
 // Contract: API index, logs/manual/manual-2026-11-16T23-01-32-060Z.txt ("parked"). The decision is journaled, with the
 // time it was seen in the API, before the first write on that task (BRIEF M3). Silent while nothing changes.
-import { amountOf, events, journal, statusOf } from '../lib/batch.mjs';
+import { amountOf, claim, events, journal, statusOf } from '../lib/batch.mjs';
 import { parkedUrl, payoutsUrl, refusalOf, show, state, taskOf, taskVar } from '../lib/flow.mjs';
 import { send } from '../lib/net.mjs';
 
@@ -27,8 +27,8 @@ if (!st.ATTEMPT) {
 }
 
 /** n of every task this agent flagged in this attempt. */
-const flagged = () => [...new Set(events().filter((e) => e.status === 'waiting_owner' && e.key?.endsWith(`:${st.ATTEMPT_SEEN_AT}`)).map((e) => Number(e.key.split(':')[1])))];
-const pending = () => flagged().filter((n) => statusOf(keyOf(n)) === 'waiting_owner' && !stopped(n));
+const flagged = () => [...new Set(events().filter((e) => ['waiting_owner', 'flag_sent'].includes(e.status) && e.key?.endsWith(`:${st.ATTEMPT_SEEN_AT}`)).map((e) => Number(e.key.split(':')[1])))];
+const pending = () => flagged().filter((n) => ['waiting_owner', 'flag_sent'].includes(statusOf(keyOf(n))) && !stopped(n));
 
 function refused(r, n, step) {
   const ref = refusalOf(r);
@@ -70,7 +70,10 @@ async function act(n, decision, entry, seenAt) {
   if (!prior.length) journal({ key, event: 'decision', n, decision, seenAt });
   const task = taskOf('run', n);
   if (!task || !st[taskVar('run', n)]) return stop(n, 'its task or token was not kept at the flag');
-  if (decision === 'decline') return finish(n, { done: 'declined' }, 'declined');
+  if (decision === 'decline') {
+    if (!claim(key, 'owner-finish')) return say(`task ${n} is already being finished by another run: nothing sent.`);
+    return finish(n, { done: 'declined' }, 'declined');
+  }
   let account;
   if (decision === 'on-file') account = st.ACCOUNT_ON_FILE;
   else if (decision === 'new') {
@@ -80,7 +83,8 @@ async function act(n, decision, entry, seenAt) {
   if (typeof account !== 'string' || !ACCOUNT.test(account)) return stop(n, `no structured account to pay (${JSON.stringify(account)})`);
   const a = amountOf(task.booking);
   if (!a.ok) return stop(n, a.why);
-  journal({ key, status: 'sent', amount: a.amount, nights: a.nights, account, decision });
+  if (!claim(key, 'owner-pay')) return say(`task ${n} is already being paid by another run: nothing sent.`);
+  journal({ key, status: 'sent', amount: a.amount, nights: a.nights, account, decision, bookingId: task.booking?.id });
   const p = await send({
     method: 'POST',
     url: payoutsUrl(),

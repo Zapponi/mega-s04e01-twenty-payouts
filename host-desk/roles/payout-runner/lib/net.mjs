@@ -81,6 +81,16 @@ const sameUrl = (a, b) => {
     return false;
   }
 };
+// The manual's guards ignore the query: /manual?x=1 is still a manual fetch that opens an attempt (Sol review B #3).
+const samePath = (a, b) => {
+  try {
+    const x = new URL(a);
+    const y = new URL(b);
+    return x.origin === y.origin && x.pathname.replace(/\/+$/, '') === y.pathname.replace(/\/+$/, '');
+  } catch {
+    return false;
+  }
+};
 
 /** Why this request may not be sent, or null. */
 export function refusal({ method, url, caller }, cfg = config()) {
@@ -93,8 +103,8 @@ export function refusal({ method, url, caller }, cfg = config()) {
   const host = u.hostname.toLowerCase();
   if (!cfg.allowedHosts.includes(host)) return `host ${host} is not in ALLOWED_HOSTS (${cfg.allowedHosts.join(', ') || 'empty'})`;
   if (!LOCAL.has(host) && u.protocol !== 'https:') return 'only https is allowed outside localhost';
-  if (cfg.denyUrls.some((d) => sameUrl(url, d))) return 'this URL is closed in this mode (DENY_URLS): a manual fetch would open a new attempt';
-  if (cfg.manualOnce && cfg.manualUrl && sameUrl(url, cfg.manualUrl) && cfg.attemptOpenUntil > Date.now()) {
+  if (cfg.denyUrls.some((d) => samePath(url, d))) return 'this URL is closed in this mode (DENY_URLS): a manual fetch would open a new attempt';
+  if (cfg.manualOnce && cfg.manualUrl && samePath(url, cfg.manualUrl) && cfg.attemptOpenUntil > Date.now()) {
     return `the manual was already fetched and its attempt is open until ${new Date(cfg.attemptOpenUntil).toISOString()}; a new fetch would deal a new batch. Run journal.mjs status and continue`;
   }
   if (cfg.readOnly && method !== 'GET') return `READ_ONLY: ${method} is refused; only GET is allowed`;
@@ -213,7 +223,7 @@ export async function send({ method = 'GET', url, headers = {}, body, caller = '
       log(cfg, { ...base, hop, url: mask(target, vars), reqHeaders: maskHeaders(h, vars), reqBody: payload === undefined ? undefined : mask(payload, vars), status: res.status, error });
       return { ok: false, error, url: mask(target, vars), body: '' };
     }
-    const isManual = res.status === 200 && cfg.manualUrl && sameUrl(target, cfg.manualUrl);
+    const isManual = res.status === 200 && cfg.manualUrl && samePath(target, cfg.manualUrl);
     if (isManual && captureAttempt(raw) && !opts.vars) vars = loadVars();
     // A script names the secrets a reply carries (task tokens, …); they are saved and masked before the log.
     if (opts.capture) {
@@ -227,6 +237,13 @@ export async function send({ method = 'GET', url, headers = {}, body, caller = '
       }
     }
     const text = mask(raw, vars);
+    // A script keeps the reply (the next task) before anything else can fail, so a crash right after a send never
+    // leaves the next task unknown (Sol review A #1).
+    if (opts.keep && res.status >= 200 && res.status < 300) {
+      try {
+        opts.keep(text);
+      } catch {}
+    }
     const resHeaders = maskHeaders(Object.fromEntries(res.headers), vars);
     log(cfg, {
       ...base,
@@ -239,6 +256,9 @@ export async function send({ method = 'GET', url, headers = {}, body, caller = '
       resBody: text,
     });
     if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
+      // A write is never sent twice: a redirect after a write is not followed, and the write counts as unclear
+      // (it reached the server) — never "not sent" (Sol review B #2).
+      if (method !== 'GET') return { ok: false, error: `redirect ${res.status} after a ${method}, not followed`, status: res.status, url: mask(target, vars), headers: resHeaders, body: text };
       target = new URL(res.headers.get('location'), target).href;
       continue;
     }

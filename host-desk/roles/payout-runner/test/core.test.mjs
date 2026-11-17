@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { after, beforeEach, test } from 'node:test';
-import { FAKE, ON_FILE, VERIFY_SECRET, startFake, token } from './fake-api.mjs';
+import { FAKE, ON_FILE, VERIFY_SECRET, booking, startFake, token } from './fake-api.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const role = join(here, '..');
@@ -340,20 +340,83 @@ test('a flag whose reply is lost blocks any payout of that task', async () => {
   fake.reset({ runTasks: 2, over: { 1: { payout: { account: 'acct_other0001' } } } });
   await openRun();
   // the flag lands, but its reply comes after the 500 ms timeout
-  const handler = fake.server.listeners('request')[0];
-  fake.server.removeAllListeners('request');
-  fake.server.on('request', (req, res) => {
-    if (req.url === '/run' && req.method === 'POST') return setTimeout(() => handler(req, res), 900);
-    return handler(req, res);
-  });
+  fake.replyDelay = { 'POST /run': 900 };
   const f = await run('settle.mjs', 'run', 'flag', 'other account');
-  fake.server.removeAllListeners('request');
-  fake.server.on('request', handler);
+  fake.replyDelay = {};
   assert.match(f.out, /FLAG UNCLEAR/);
+  assert.ok(fake.parked.has(1), 'the flag did land');
   const p = await run('settle.mjs', 'run', 'pay');
   assert.match(p.out, /already has status "flag_sent"/);
   assert.equal(pays().length, 0);
   assert.match((await run('journal.mjs', 'status')).out, /next: report task 1 of run \(flag_sent/);
+});
+
+test('a lost flag that did land is still finished by parked once the owner decides (Sol A #3)', async () => {
+  fake.reset({ runTasks: 2, over: { 1: { payout: { account: 'acct_other0001' } } } });
+  await openRun();
+  fake.replyDelay = { 'POST /run': 900 };
+  assert.match((await run('settle.mjs', 'run', 'flag', 'other account')).out, /FLAG UNCLEAR/);
+  fake.replyDelay = {};
+  assert.equal(fake.parked.get(1), null, 'the flag landed; the owner has not decided');
+  fake.parked.set(1, 'on-file');
+  const p = await run('parked.mjs');
+  assert.equal(p.code, 0, p.out);
+  assert.equal(pays().filter((h) => h.body.task === token('run', 1)).length, 1);
+  assert.equal(parkedPosts().length, 1);
+});
+
+test('after a crash, the answer goes out with the task\'s own token, not the next task\'s (Sol A #1)', async () => {
+  fake.reset({ runTasks: 3 });
+  await openRun();
+  assert.equal((await run('settle.mjs', 'run', 'pay')).code, 0); // task 1 answered; CUR_TASK now holds task 2
+  // as if the process died after the payout of task 1 and before its answer was kept
+  const sd = dirname(env.STATE_FILE);
+  writeFileSync(join(sd, 'current-run.json'), readFileSync(join(sd, 'task-run-1.json')));
+  const st = JSON.parse(readFileSync(env.STATE_FILE, 'utf8'));
+  const paid = journal().find((e) => e.status === 'paid');
+  writeFileSync(join(env.JOURNAL_DIR, 'journal.jsonl'), `${readFileSync(join(env.JOURNAL_DIR, 'journal.jsonl'), 'utf8')}${JSON.stringify({ ...paid, time: new Date().toISOString(), key: `run:1:${st.ATTEMPT_SEEN_AT}` })}\n`);
+  await run('settle.mjs', 'run', 'answer');
+  const last = fake.hits.filter((h) => h.path === '/run' && h.body.answer !== undefined).at(-1);
+  assert.equal(last.body.task, token('run', 1));
+});
+
+test('an open whose reply is lost is never sent again (Sol A #2)', async () => {
+  await fetchManual();
+  assert.equal((await run('check-key.mjs')).code, 0);
+  fake.replyDelay = { 'POST /run': 900 };
+  const s1 = await run('start.mjs', 'run');
+  fake.replyDelay = {};
+  assert.match(s1.out, /ERROR/);
+  const s2 = await run('start.mjs', 'run');
+  assert.notEqual(s2.code, 0);
+  assert.match(s2.out, /never open it twice/);
+  assert.equal(fake.hits.filter((h) => h.body.attempt).length, 1);
+});
+
+test('two settles at once on one task: one payout (Sol B #4)', async () => {
+  fake.reset({ runTasks: 2 });
+  await openRun();
+  const [a, b] = await Promise.all([run('settle.mjs', 'run', 'pay'), run('settle.mjs', 'run', 'pay')]);
+  assert.equal(pays().length, 1, `${a.out}\n${b.out}`);
+});
+
+test('a 200 key check that says refused does not open the run (Sol B #5)', async () => {
+  fake.reset({ verifyReply: { status: 'refused', reason: 'key revoked' } });
+  await fetchManual();
+  const k = await run('check-key.mjs');
+  assert.equal(k.code, 1);
+  assert.match(k.out, /KEY CHECK FAILED/);
+  assert.notEqual((await run('start.mjs', 'run')).code, 0);
+  assert.equal(fake.hits.filter((h) => h.body.attempt).length, 0);
+});
+
+test('the same booking and amount under another task number is not paid again (Sol B #6)', async () => {
+  fake.reset({ runTasks: 2, over: { 2: { booking: booking(1) } } });
+  await openRun();
+  assert.equal((await run('settle.mjs', 'run', 'pay')).code, 0);
+  const r = await run('settle.mjs', 'run', 'pay');
+  assert.match(r.out, /NOT PAID, task 2: booking BK-1001 .* already sent/);
+  assert.equal(pays().length, 1);
 });
 
 test('a 429 on the answer is not a refusal: the task stays paid and only the answer may be retried', async () => {
