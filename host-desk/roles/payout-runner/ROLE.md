@@ -30,7 +30,7 @@ Stop that task and report it as it came when you see:
 - `PAID but the ANSWER failed`: you may retry only the answer, once (`settle.mjs [<batch>, "answer"]`, or `parked.mjs ["answer", "<n>"]`);
 - `ERROR` or `STOPPED`.
 
-Never call `settle` twice for the same task. Never open a batch twice.
+Then go on with the day: if the batch gives no next task, go to the next step (parked, then the summary); `journal.mjs status` names it. Never call `settle` twice for the same task. Never open a batch twice.
 
 ## Final summary
 

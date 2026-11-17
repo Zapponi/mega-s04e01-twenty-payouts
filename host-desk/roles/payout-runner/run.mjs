@@ -10,13 +10,15 @@
 // MODE=run with ALLOW_RUN=1: ROLE.md, the real batch; also verify-s04.mega.dev for the key check; the manual may be
 // fetched only while no attempt is open (MANUAL_ONCE=1). Anything else refuses to start.
 import { spawn } from 'node:child_process';
-import { createWriteStream, mkdirSync } from 'node:fs';
+import { createWriteStream, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config, mask } from './lib/net.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const MANUAL = 'https://hq.mega.dev/challenges/twenty-payouts/manual';
+// Only the lab points the scripts elsewhere; a stray value in the shell never redirects a real run.
+if (process.env.MODE !== 'lab') for (const k of ['API_BASE', 'PAYOUTS_URL', 'VERIFY_BASE', 'VARS_FILE', 'STATE_FILE', 'JOURNAL_DIR']) delete process.env[k];
 let role;
 if (process.env.READ_ONLY === '1') {
   role = 'ROLE.slice1.md';
@@ -40,6 +42,24 @@ if (process.env.READ_ONLY === '1') {
   process.env.ALLOWED_HOSTS = 'hq.mega.dev,pay-s04.mega.dev,verify-s04.mega.dev';
   process.env.MANUAL_URL = MANUAL;
   process.env.MANUAL_ONCE = '1';
+  delete process.env.DENY_URLS;
+  delete process.env.WRITE_URLS;
+} else if (process.env.MODE === 'lab') {
+  // The lab (plan.md § 4): ROLE.md with the course URLs pointed at the local mock (LAB_URL); localhost only; the
+  // lab's fake vars and its own state, logs and journal under LAB_OUT, so nothing real is read or touched.
+  const lab = process.env.LAB_URL;
+  const out = process.env.LAB_OUT;
+  if (!lab || !/^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(lab) || !out) {
+    console.error('MODE=lab needs LAB_URL=http://localhost:<port> and LAB_OUT=<dir> (lab/run-lab.mjs sets both).');
+    process.exit(2);
+  }
+  mkdirSync(out, { recursive: true });
+  role = join(out, 'ROLE.md');
+  writeFileSync(role, readFileSync(join(here, 'ROLE.md'), 'utf8').split('https://hq.mega.dev/challenges/twenty-payouts').join(lab));
+  Object.assign(process.env, {
+    ALLOWED_HOSTS: 'localhost', API_BASE: lab, PAYOUTS_URL: `${lab}/payouts`, VERIFY_BASE: `${lab}/verify`, MANUAL_URL: `${lab}/manual`, MANUAL_ONCE: '1', ALLOW_RUN: '1',
+    VARS_FILE: join(here, '../../../lab/vars.lab.json'), STATE_FILE: join(out, 'state', 'vars.json'), LOG_DIR: join(out, 'logs'), JOURNAL_DIR: join(out, 'journal'),
+  });
   delete process.env.DENY_URLS;
   delete process.env.WRITE_URLS;
 } else {

@@ -270,7 +270,7 @@ test('restart after a kill during a payout: "sent" with no receipt is never sent
   const r = await run('settle.mjs', 'run', 'pay');
   assert.notEqual(r.code, 0);
   assert.equal(pays().length, 0);
-  assert.match((await run('journal.mjs', 'status')).out, /next: stop: task 1 of run is sent/);
+  assert.match((await run('journal.mjs', 'status')).out, /next: report task 1 of run \(sent; never retry it\), then the final summary/);
 });
 
 test('a refusal with a need is journaled, printed, and the task is never retried', async () => {

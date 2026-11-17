@@ -3,6 +3,7 @@
 //   ./verify            unit tests + must checks M1–M7
 //   ./verify --slice 1  unit tests + slice 1 checks (latest run in logs/)
 //   ./verify --all      must checks + keep checks K1–K2
+//   ./verify --lab [lab/out/<run>]  unit tests + the lab checks of lab/EXPECTED.md (latest finished lab run)
 // It reads the request log, the run log, the saved manual and (later) the API state; never the agent's report on
 // itself. It reads vars.json only to search for leaked values, and never prints a value.
 import { spawnSync } from 'node:child_process';
@@ -134,8 +135,33 @@ function mustChecks() {
   return checks({ records, journal: readJsonl(join(ROOT, 'journal/journal.jsonl')), manualText, checkLane: readJsonl(join(LOGS, 'check-lane.jsonl')) });
 }
 
+// --lab [dir]: the lab checks (proof/lab.mjs, lab/EXPECTED.md) on one lab run, the latest under lab/out/ by default.
+async function labRun() {
+  const outDir = join(ROOT, 'lab/out');
+  const given = args[args.indexOf('--lab') + 1];
+  const runs = existsSync(outDir) ? readdirSync(outDir).filter((d) => existsSync(join(outDir, d, 'truth.jsonl')) && existsSync(join(outDir, d, 'done.json'))).sort() : [];
+  const dir = given && !given.startsWith('--') ? join(ROOT, given) : runs.length ? join(outDir, runs.at(-1)) : null;
+  if (!dir || !existsSync(join(dir, 'truth.jsonl'))) return check('lab', false, 'no finished lab run under lab/out/: run node lab/run-lab.mjs first');
+  const { labChecks } = await import('./proof/lab.mjs');
+  const { scenario, LAB_VARS } = await import('./lab/mock-api.mjs');
+  const texts = [...walk(join(dir, 'logs')), ...walk(join(dir, 'journal')), ...walk(join(dir, 'agent'))].map((f) => ({ name: relative(ROOT, f), text: readFileSync(f, 'utf8') }));
+  let st = {};
+  try {
+    st = JSON.parse(readFileSync(join(dir, 'state/vars.json'), 'utf8'));
+  } catch {}
+  const secrets = [...Object.values(LAB_VARS), ...Object.entries(st).filter(([k]) => /^(ATTEMPT|VERIFY_PATH|CUR_TASK|TASK_[A-Z]+_\d+)(_PREV_\d+)?$/.test(k)).map(([, v]) => v)];
+  let kill = null;
+  try {
+    kill = JSON.parse(readFileSync(join(dir, 'kill.json'), 'utf8'));
+  } catch {}
+  console.log(`lab run: ${relative(ROOT, dir)}`);
+  for (const r of labChecks({ truth: readJsonl(join(dir, 'truth.jsonl')), scenario: scenario(), journal: readJsonl(join(dir, 'journal/journal.jsonl')), texts, secrets, kill })) check(r.id, r.ok, r.detail);
+}
+
 unitTests();
-if (slice === '1') {
+if (args.includes('--lab')) {
+  await labRun();
+} else if (slice === '1') {
   slice1();
   m5();
 } else {

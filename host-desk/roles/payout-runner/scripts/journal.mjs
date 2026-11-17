@@ -21,6 +21,7 @@ const key = ev.filter((e) => e.event === 'key_checked').at(-1);
 lines.push(`key check: ${key ? (key.ok ? `ok (${key.time})` : `FAILED (http ${key.http ?? '-'}, ${key.why ?? ''})`) : 'not done in this attempt'}`);
 
 let next = open ? null : 'fetch the manual (GET /manual, Bearer {{TICKET}}), once';
+let stopNote = null;
 if (!next && !key?.ok) next = 'check-key.mjs';
 for (const batch of ['practice', 'run']) {
   const opened = ev.some((e) => e.event === 'opened' && e.batch === batch);
@@ -37,8 +38,17 @@ for (const batch of ['practice', 'run']) {
   if (!opened) next = `start.mjs ${batch}`;
   else if (cur?.status === 'task' && !s) next = `settle.mjs ${batch} pay (or flag) for task ${cur.n}`;
   else if (s === 'paid') next = `settle.mjs ${batch} answer for task ${cur.n}`;
-  else if (['sent', 'uncertain', 'refused'].includes(s)) next = `stop: task ${cur.n} of ${batch} is ${s}; tell the human`;
-  else if (batch === 'run' && by('waiting_owner').length) next = 'parked.mjs';
+  else if (['sent', 'uncertain', 'refused'].includes(s)) {
+    // that task is never retried; the rest of the day goes on
+    const then = batch === 'practice' ? 'go on to the run' : by('waiting_owner').length ? 'parked.mjs' : 'the final summary';
+    next = `report task ${cur.n} of ${batch} (${s}; never retry it), then ${then}`;
+    if (batch === 'practice') {
+      lines.push(`${batch} stopped at task ${cur.n}`);
+      next = null;
+      stopNote = `report task ${cur.n} of practice (${s}; never retry it)`;
+    }
+  } else if (batch === 'run' && by('waiting_owner').length) next = 'parked.mjs';
 }
+if (stopNote) next = next ? `${stopNote}; ${next}` : stopNote;
 lines.push(`next: ${next ?? 'nothing left: write the final summary'}`);
 console.log(lines.join('\n'));
