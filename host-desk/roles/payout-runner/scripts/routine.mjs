@@ -140,6 +140,8 @@ const payoutWait = () => Math.max(200, Math.min(TIMEOUT_MS, deadline - Date.now(
  * A flag that is refused or unclear still stops: the batch's next task comes only in the flag's reply.
  */
 async function flagOwner(n, key, tok, why) {
+  // one flag per task, atomic across processes, never released (Sol re-review 2026-11-17 P1: two recoveries at once)
+  if (!claim(key, 'flag')) stop(`task ${n}: its owner flag is already sent or being sent by another run; never sent twice. Tell the human.`);
   journal({ key, status: 'flag_sent', n, reason: why });
   const r = await send({ method: 'POST', url: batchUrl(batch), body: { task: tok, flag: 'needs-owner', reason: why.slice(0, 300) }, signal: signal() }, { capture: captureTask(batch), keep });
   refusedStop(r, key, n, 'flag');

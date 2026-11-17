@@ -561,6 +561,17 @@ test('routine: a crash after a 307 payout and before its flag: the restart flags
   assert.equal(fake.hits.filter((h) => h.body.flag).length, 1);
 });
 
+test('routine: two recoveries at once after a crash send the owner flag once (Sol re-review P1)', async () => {
+  fake.reset({ runTasks: 3, payoutStatus: { 1: MOVED } });
+  await openForRoutine();
+  env.TEST_CRASH_AT = 'after-unclear-payout';
+  assert.equal((await run('routine.mjs', 'run')).code, 9);
+  delete env.TEST_CRASH_AT;
+  const [a, b] = await Promise.all([run('routine.mjs', 'run'), run('routine.mjs', 'run')]);
+  assert.equal(fake.hits.filter((h) => h.body.flag).length, 1, `${a.out}\n${b.out}`);
+  assert.equal(pays().filter((h) => h.body.task === token('run', 1)).length, 1);
+});
+
 test('routine: a hung payout late in the batch waits only until the deadline minus the flag reserve (Sol #3)', async () => {
   fake.reset({ runTasks: 4, runLimitMs: 3000, payoutDelayFor: { 3: 6000 } });
   await openForRoutine();
