@@ -12,6 +12,10 @@ Not checked yet. The keep skill's scripts/keep-check.mjs fills this part. Never 
 <!-- keep:can-run:end -->
 
 ## Findings
+- Prática completa pelo agente (haiku-5.5, arquitetura híbrida): 3 tarefas pagas uma vez e respondidas (1750, 1745, 2110 EUR), resposta final `{"status":"done","message":"Practice is done. Start the run with your attempt when the agent is ready."}` · source: logs/requests.jsonl run 2026-11-17T00-06-18-066Z + journal/journal.jsonl · how: ran
+- O limite é por tarefa: cada tarefa nova chega com `timeLeftMs: 8000`; da tarefa ao pagamento o agente levou ~2,2–2,9 s, a prática inteira 7,2 s · source: logs/requests.jsonl run 2026-11-17T00-06-18-066Z (horários) · how: ran
+- Um novo `POST /practice` com `{ attempt }` reabre a prática na tarefa 1 com o relógio cheio (a tarefa 1 aberta às 23:50Z tinha vencido) · source: mesmo log, 1ª linha · how: ran
+- A resposta do pagamento é `{"status":"paid","receipt":"v1.<jwt>","next":"Send this receipt with the task's answer to the run."}`; o recibo é assinado e traz conta e valor · source: mesmo log · how: ran
 - `POST /practice` com `{ attempt }` devolveu 200 e UMA tarefa por vez: `{"status":"task","n":1,"of":3,"runLimitMs":8000,"timeLeftMs":8000,"booking":{id,checkIn,checkOut,nightlyRate,cleaningFee,currency:"EUR"},"payout":{"account","url"},"task":<token>,"next":"Pay this booking at the payout API, then send its answer and the payout receipt here."}` · source: logs/practice/practice-open-practice-2026-11-16T23-50-42-921Z.txt · how: ran
 - O limite da prática é `runLimitMs: 8000` (8 s), mostrado no início; o modelo não cabe nesse tempo por tarefa, então pagar e responder tem de ser um script só · source: mesmo arquivo · how: ran
 - A tarefa traz a conta do pagamento num campo estruturado (`payout.account`) e o valor sai dos campos da reserva (checkIn, checkOut, nightlyRate, cleaningFee) · source: mesmo arquivo · how: ran
