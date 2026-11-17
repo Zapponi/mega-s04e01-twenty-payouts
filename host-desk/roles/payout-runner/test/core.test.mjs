@@ -608,6 +608,29 @@ test('lock: a second session is refused while the first one runs', { skip: proce
   assert.ok(!existsSync(join(dir, 'pi-starts')), 'pi never started');
 });
 
+test('journal status after a closed attempt with a refused run: no old batch shown, says fetch the manual', async () => {
+  // real run nº 2 (2026-11-17): the old attempt's "run: opened … refused [2]" made the model refuse to fetch
+  const old = '2026-11-17T03:00:30.855Z';
+  writeFileSync(env.STATE_FILE, JSON.stringify({ ATTEMPT: 'att_old', ATTEMPT_SEEN_AT: old, ATTEMPT_EXPIRES_AT: '2026-11-17T06:00:29.000Z' }));
+  mkdirSync(env.JOURNAL_DIR, { recursive: true });
+  const lines = [
+    { event: 'key_checked', ok: true, attempt: old },
+    { event: 'opened', batch: 'practice', attempt: old },
+    { key: `practice:1:${old}`, status: 'answered' },
+    { event: 'opened', batch: 'run', attempt: old },
+    { key: `run:1:${old}`, status: 'answered' },
+    { key: `run:2:${old}`, status: 'refused', why: 'Time ran out at task 2.' },
+  ];
+  writeFileSync(join(env.JOURNAL_DIR, 'journal.jsonl'), lines.map((l) => JSON.stringify({ time: old, ...l })).join('\n') + '\n');
+  const r = await run('journal.mjs', 'status');
+  assert.equal(r.code, 0);
+  assert.match(r.out, /attempt: none open \(last fetched .*closed\)/);
+  assert.match(r.out, /previous attempt: closed and over/);
+  assert.match(r.out, /next: fetch the manual/);
+  assert.doesNotMatch(r.out, /^(practice|run): /m, 'no batch line of the closed attempt');
+  assert.doesNotMatch(r.out, /refused \[/);
+});
+
 test('journal status with nothing done says: fetch the manual once', async () => {
   const r = await run('journal.mjs', 'status');
   assert.equal(r.code, 0);
