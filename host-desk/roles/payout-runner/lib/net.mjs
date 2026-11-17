@@ -61,33 +61,56 @@ export function config(env = process.env) {
   };
 }
 
-/** The URL prefixes a secret may be sent to, or null for a name with no scope (not a credential). */
+/**
+ * Where a secret may be sent, or null for a name with no scope (not a credential). Each entry is { base } (that path
+ * and below, on that origin: the course API) or { exact } (that one endpoint: the payout API, Sol review P2).
+ */
 export function scopeOf(name, cfg = config()) {
   const n = name.replace(/_PREV_\d+$/, '');
-  if (n === 'TICKET' || n === 'ATTEMPT') return [cfg.apiBase];
-  if (n === 'PAYOUT_KEY') return [cfg.payoutsUrl];
-  if (n === 'CUR_TASK' || /^TASK_[A-Z]+_\d+$/.test(n)) return [cfg.apiBase, cfg.payoutsUrl];
+  if (n === 'TICKET' || n === 'ATTEMPT') return [{ base: cfg.apiBase }];
+  if (n === 'PAYOUT_KEY') return [{ exact: cfg.payoutsUrl }];
+  if (n === 'CUR_TASK' || /^TASK_[A-Z]+_\d+$/.test(n)) return [{ base: cfg.apiBase }, { exact: cfg.payoutsUrl }];
   return null;
 }
 
-function within(url, prefix) {
+const trimPath = (p) => p.replace(/\/+$/, '');
+/** Parsed and normalized by WHATWG URL (default port dropped, dot segments resolved). */
+export function inScope(url, spec) {
   try {
     const u = new URL(url);
-    const p = new URL(prefix);
-    const base = p.pathname.replace(/\/+$/, '');
-    return u.origin === p.origin && (u.pathname === base || u.pathname.startsWith(`${base}/`) || base === '');
+    const p = new URL(spec.exact ?? spec.base);
+    if (u.origin !== p.origin) return false;
+    const want = trimPath(p.pathname);
+    const got = trimPath(u.pathname);
+    if (spec.exact) return got === want;
+    return want === '' || got === want || got.startsWith(`${want}/`);
   } catch {
     return false;
   }
 }
 
+/** Percent-decodes until stable (any hex case, char by char), so an encoded secret is still seen (Sol review P1). */
+export function decodeAll(s) {
+  let cur = String(s ?? '');
+  for (let i = 0; i < 5; i++) {
+    const next = cur.replace(/%[0-9a-fA-F]{2}/g, (m) => {
+      const c = String.fromCharCode(parseInt(m.slice(1), 16));
+      return c;
+    });
+    if (next === cur) break;
+    cur = next;
+  }
+  return cur;
+}
+
 /** Why this request may not carry the secrets it holds to this URL, or null. */
 export function scopeRefusal(target, outgoing, vars, cfg = config()) {
+  const plain = decodeAll(outgoing);
   for (const [k, v] of Object.entries(vars)) {
     if (typeof v !== 'string' || v.length < 4) continue;
     const scope = scopeOf(k, cfg);
-    if (!scope || !(outgoing.includes(v) || outgoing.includes(encodeURIComponent(v)))) continue;
-    if (!scope.some((p) => within(target, p))) return `secret {{${k}}} may go only to ${scope.join(' or ')}; this request would send it to ${new URL(target).host}. Nothing was sent`;
+    if (!scope || !(outgoing.includes(v) || plain.includes(v) || plain.includes(decodeAll(v)))) continue;
+    if (!scope.some((p) => inScope(target, p))) return `secret {{${k}}} may go only to ${scope.map((p) => p.exact ?? `${p.base}/…`).join(' or ')}; this request would send it to ${new URL(target).host}. Nothing was sent`;
   }
   return null;
 }
@@ -105,6 +128,12 @@ export function mask(text, vars = loadVars()) {
     .sort((a, b) => b[1].length - a[1].length || rank(a[0]) - rank(b[0]));
   for (const [k, v] of pairs) {
     for (const form of new Set([v, encodeURIComponent(v)])) s = s.split(form).join(`{{${k}}}`);
+  }
+  // a value hidden by other percent-encodings (char by char, mixed case): mask the decoded text instead (Sol P1)
+  const plain = decodeAll(s);
+  if (plain !== s && pairs.some(([, v]) => plain.includes(v))) {
+    s = plain;
+    for (const [k, v] of pairs) s = s.split(v).join(`{{${k}}}`);
   }
   return s;
 }

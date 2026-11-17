@@ -90,7 +90,26 @@ export function model(records) {
 const list = (a) => (a.length ? a.join(', ') : 'none');
 
 // Where each secret may go on the real hosts (M8). Tests on a local fake pass their own.
-export const REAL_SCOPE = { TICKET: ['https://hq.mega.dev/challenges/twenty-payouts'], ATTEMPT: ['https://hq.mega.dev/challenges/twenty-payouts'], PAYOUT_KEY: ['https://pay-s04.mega.dev/payouts'] };
+// { base }: that path and below on that origin; { exact }: that one endpoint.
+export const REAL_SCOPE = {
+  TICKET: [{ base: 'https://hq.mega.dev/challenges/twenty-payouts' }],
+  ATTEMPT: [{ base: 'https://hq.mega.dev/challenges/twenty-payouts' }],
+  PAYOUT_KEY: [{ exact: 'https://pay-s04.mega.dev/payouts' }],
+};
+/** Compares parsed, normalized URLs (default port, dot segments), never text prefixes (Sol review P3). */
+function allowed(url, spec) {
+  try {
+    const u = new URL(url);
+    const p = new URL(spec.exact ?? spec.base);
+    if (u.origin !== p.origin) return false;
+    const want = p.pathname.replace(/\/+$/, '');
+    const got = u.pathname.replace(/\/+$/, '');
+    if (spec.exact) return got === want;
+    return want === '' || got === want || got.startsWith(`${want}/`);
+  } catch {
+    return false;
+  }
+}
 
 export function checks({ records, journal = [], manualText = '', checkLane = [], expectOf = 20, scope = REAL_SCOPE }) {
   const out = [];
@@ -98,6 +117,7 @@ export function checks({ records, journal = [], manualText = '', checkLane = [],
   const m = model(records);
   if (!m) {
     for (const id of ['M1', 'M2', 'M3', 'M4', 'M6', 'M7']) add(id, false, 'no run opened in the request log (no 2xx POST /run { attempt }) yet');
+    add('M8', ...secretScope(records, scope));
     return out;
   }
   const { tasks, writes, decisions, recs } = m;
@@ -211,10 +231,16 @@ export function checks({ records, journal = [], manualText = '', checkLane = [],
   }
   add('M7', m7.length === 0, `${refs.length} refusal(s) in the run; problems: ${list(m7)}`);
 
-  // M8 (real run 3, check-lane payout-run): hop by hop, from the manual fetch of this attempt on, no request that left
-  // carried a secret outside its scope. The ticket and attempt go only to the course API, the payout key only to the
-  // payout API. Written again here, not shared with the agent's net.mjs.
-  const SCOPE = scope;
+  add('M8', ...secretScope(records, scope));
+  return out;
+}
+
+/**
+ * M8 (real run 3, check-lane payout-run): hop by hop, from the manual fetch of this attempt on, no request that left
+ * carried a secret outside its scope. The ticket and attempt go only to the course API, the payout key only to the
+ * payout API. Written again here, not shared with the agent's net.mjs. Needs no opened run. Returns [ok, detail].
+ */
+function secretScope(records, SCOPE) {
   const lastOpenAt = records.map((r, i) => ({ r, i })).filter(({ r }) => r.method === 'POST' && /\/run\/?$/.test(path(r.url)) && r.status >= 200 && r.status < 300 && /"attempt"/.test(r.reqBody ?? '')).at(-1)?.i ?? records.length;
   const from = records.slice(0, lastOpenAt).map((r, i) => ({ r, i })).filter(({ r }) => /\/manual\/?$/.test(path(r.url)) && r.status === 200).at(-1)?.i ?? 0;
   const m8 = [];
@@ -223,11 +249,12 @@ export function checks({ records, journal = [], manualText = '', checkLane = [],
     if (!sentReq(r)) continue; // refused by the request layer: never left
     sent++;
     const carried = `${r.url}\n${JSON.stringify(r.reqHeaders ?? {})}\n${r.reqBody ?? ''}`;
-    for (const [name, prefixes] of Object.entries(SCOPE)) {
-      if (!carried.includes(`{{${name}}}`)) continue;
-      if (!prefixes.some((p) => String(r.url).startsWith(p))) m8.push(`${r.time} ${r.method} ${String(r.url).split("/")[2]} carried {{${name}}}`);
+    // every placeholder of a scoped secret, old aliases too ({{ATTEMPT_PREV_1}}: Sol review P4)
+    for (const [, name] of carried.matchAll(/\{\{([A-Z][A-Z0-9_]*?)(?:_PREV_\d+)?\}\}/g)) {
+      const specs = SCOPE[name];
+      if (!specs) continue;
+      if (!specs.some((p) => allowed(r.url, p))) m8.push(`${r.time} ${r.method} ${String(r.url).split('/')[2]} carried {{${name}}}`);
     }
   }
-  add('M8', sent > 0 && m8.length === 0, `${sent} request(s) that left in this attempt checked; secrets outside their scope: ${list(m8)}`);
-  return out;
+  return [sent > 0 && m8.length === 0, `${sent} request(s) that left in this attempt checked; secrets outside their scope: ${list(m8)}`];
 }

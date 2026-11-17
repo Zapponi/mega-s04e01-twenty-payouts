@@ -59,7 +59,7 @@ before(async () => {
 });
 
 const clone = () => structuredClone(base);
-const SCOPE = { TICKET: [fake.base], ATTEMPT: [fake.base], PAYOUT_KEY: [`${fake.base}/payouts`] };
+const SCOPE = { TICKET: [{ base: fake.base }], ATTEMPT: [{ base: fake.base }], PAYOUT_KEY: [{ exact: `${fake.base}/payouts` }] };
 const result = (input, id) => checks({ expectOf: 4, checkLane: [], scope: SCOPE, ...input }).find((r) => r.id === id);
 const body = (r) => JSON.parse(r.reqBody);
 const find = (recs, pred) => recs.findIndex((r) => { try { return pred(r, JSON.parse(r.reqBody ?? 'null')); } catch { return false; } });
@@ -80,6 +80,17 @@ test('M8 fails when a request that left carried the payout key to another URL (r
   assert.equal(r.ok, false, r.detail);
   assert.match(r.detail, /carried \{\{PAYOUT_KEY\}\}/);
   assert.equal(result(clone(), 'M8').ok, true, 'the clean run passes M8');
+});
+
+test('M8 compares parsed URLs on the real scope: lookalike paths fail, equivalent URLs pass, old aliases count (Sol P3/P4)', () => {
+  const rec = (url, headers, body) => ({ time: 't', method: 'POST', url, reqHeaders: headers, reqBody: body, status: 200 });
+  const m8 = (recs) => checks({ records: recs, expectOf: 20 }).find((r) => r.id === 'M8');
+  const man = { time: 't', method: 'GET', url: 'https://hq.mega.dev/challenges/twenty-payouts/manual', reqHeaders: { authorization: 'Bearer {{TICKET}}' }, status: 200 };
+  assert.equal(m8([man, rec('https://hq.mega.dev/challenges/twenty-payoutsX/run', { authorization: 'Bearer {{TICKET}}' })]).ok, false, 'twenty-payoutsX is not the API');
+  assert.equal(m8([man, rec('https://pay-s04.mega.dev/payouts/../collect', { 'x-payout-key': '{{PAYOUT_KEY}}' })]).ok, false, '/collect is not /payouts');
+  assert.equal(m8([man, rec('https://pay-s04.mega.dev/payouts/sub', { 'x-payout-key': '{{PAYOUT_KEY}}' })]).ok, false, 'below /payouts is not /payouts');
+  assert.equal(m8([man, rec('https://pay-s04.mega.dev:443/payouts', { 'x-payout-key': '{{PAYOUT_KEY}}' })]).ok, true, 'the default port is the same URL');
+  assert.equal(m8([man, rec('https://pay-s04.mega.dev/payouts', {}, '{"attempt":"{{ATTEMPT_PREV_1}}"}')]).ok, false, 'an old attempt to the payout host');
 });
 
 test('no run in the log: every must check fails', () => {

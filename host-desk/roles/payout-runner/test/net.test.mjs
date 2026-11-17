@@ -36,6 +36,12 @@ before(async () => {
         res.writeHead(302, { location: 'https://evil.example/steal' });
         return res.end();
       }
+      if (req.url.startsWith('/payouts?')) {
+        // Sol P1: the key, sent in a query to the payout endpoint, bounced to the course API encoded char by char
+        const enc = [...FAKE.PAYOUT_KEY].map((c, i) => `%${c.charCodeAt(0).toString(16)[i % 2 ? 'toUpperCase' : 'toLowerCase']()}`).join('');
+        res.writeHead(302, { location: `/run?k=${enc}` });
+        return res.end();
+      }
       if (req.url === '/redirect-in') {
         res.writeHead(302, { location: '/manual' });
         return res.end();
@@ -82,6 +88,23 @@ test('an echoed secret comes back masked, to the model and in the log', async ()
   assert.match(text, /\{\{TICKET\}\}/);
   noSecret(text, 'tool result');
   noSecret(logText(), 'requests.jsonl');
+});
+
+test('secret scope: char-by-char encoding, mixed hex case and a redirect hop never carry the key out (Sol P1/P2)', async () => {
+  const { scopeRefusal } = await import('../lib/net.mjs');
+  const cfg = { apiBase: base, payoutsUrl: `${base}/payouts` };
+  const enc = [...FAKE.PAYOUT_KEY].map((c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`).join('');
+  assert.match(scopeRefusal(`${base}/run?k=${enc}`, `${base}/run?k=${enc}`, FAKE, cfg) ?? '', /PAYOUT_KEY/);
+  assert.match(scopeRefusal(`${base}/payouts/collect`, `x ${FAKE.PAYOUT_KEY}`, FAKE, cfg) ?? '', /PAYOUT_KEY/, 'below /payouts is out');
+  assert.equal(scopeRefusal(`${base}/payouts`, `x ${FAKE.PAYOUT_KEY}`, FAKE, cfg), null, 'the endpoint itself is in');
+  assert.equal(scopeRefusal(`${base}/payouts/`, `x ${FAKE.PAYOUT_KEY}`, FAKE, cfg), null, 'a trailing slash is the same endpoint');
+  // through send: the first hop is in scope, the redirect hop is refused and never reaches /run
+  hits = [];
+  const r = await send({ url: `${base}/payouts?k={{PAYOUT_KEY}}` });
+  assert.match(r.refused ?? '', /secret \{\{PAYOUT_KEY\}\}/);
+  assert.equal(hits.filter((h) => h.url.startsWith('/run')).length, 0, 'the redirect hop never left');
+  noSecret(logText(), 'requests.jsonl');
+  assert.equal(mask(`k=${enc}`, FAKE), 'k={{PAYOUT_KEY}}', 'masking sees the char-encoded value too');
 });
 
 test('mask covers raw and URL-encoded values', () => {
