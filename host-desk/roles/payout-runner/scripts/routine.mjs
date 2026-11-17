@@ -5,7 +5,9 @@
 //   - a plain payout to the account on file → pay once, answer with the receipt;
 //   - anything else (another account, a field a plain task does not carry, a booking already paid, an amount the rule
 //     cannot compute) → in the run: flag it for the owner and go on; in the practice: stop;
-//   - a refusal, an unclear payout or flag → stop at once: that task is never retried.
+//   - a payout with no receipt and no refusal (a redirect, a timeout, an error) → in the run: never sent again, flag it
+//     for the owner with the reason and go on (real run 2: a stop there lost the batch); in the practice: stop;
+//   - a refusal, or an unclear flag → stop at once: that task is never retried.
 // One process, so Node's fetch keeps the connections to the course and payout hosts open between tasks.
 // It prints one line per task and a summary; every request is in the request log, every step in the journal.
 import { amountOf, claim, events, journal, oddFields, release, statusOf, targetOf } from '../lib/batch.mjs';
@@ -51,6 +53,14 @@ function refusedStop(r, key, n, step) {
   if (!ref) return;
   journal({ key, status: 'refused', step, need: ref.need, why: ref.why, http: r.status, pointer: pointerOf(r) });
   stop(`REFUSED task ${n} at ${step}: ${ref.why}${ref.need ? `; need: ${ref.need}` : ''}${pointerOf(r) ? `; ${pointerOf(r)}` : ''}. Never retried. The harness calls check-lane with the need.`, 5);
+}
+/** The host a redirect body names (never its path: it may hold a token), or "an address not given". */
+function hostOf(body) {
+  try {
+    return new URL(JSON.parse(body)?.url).host;
+  } catch {
+    return 'an address not given';
+  }
 }
 function pointerOf(r) {
   try {
@@ -116,6 +126,29 @@ function advance(prev) {
   stop(`the ${batch} gave no next task after task ${prev.n} of ${prev.of ?? '?'} (reply: ${JSON.stringify(nx)?.slice(0, 200)}). Never taken for the end: tell the human.`);
 }
 
+/**
+ * Hands task n to the owner with a flag and moves on to the next task. The caller holds the 'act' claim.
+ * A flag that is refused or unclear still stops: the batch's next task comes only in the flag's reply.
+ */
+async function flagOwner(n, key, tok, why) {
+  journal({ key, status: 'flag_sent', n, reason: why });
+  const r = await send({ method: 'POST', url: batchUrl(batch), body: { task: tok, flag: 'needs-owner', reason: why.slice(0, 300) }, signal: signal() }, { capture: captureTask(batch), keep });
+  refusedStop(r, key, n, 'flag');
+  if (r.refused) {
+    journal({ key, status: 'not_sent', step: 'flag', why: r.refused });
+    release(key, 'act');
+    stop(`flag of task ${n} not sent: ${r.refused}`);
+  }
+  if (!(r.status >= 200 && r.status < 300)) {
+    journal({ key, event: 'flag_failed', http: r.status, why: r.error });
+    stop(`FLAG UNCLEAR for task ${n}: ${show(r)}. It may have landed: never paid; parked.mjs finishes it if the owner decides it.`);
+  }
+  journal({ key, status: 'waiting_owner', n, reason: why, http: r.status });
+  summary.flagged.push(n);
+  out(`task ${n}: FLAGGED for the owner (${why})`);
+  return advance(task);
+}
+
 while (task?.status === 'task') {
   const n = task.n;
   const key = `${batch}:${n}:${st.ATTEMPT_SEEN_AT}`;
@@ -145,22 +178,7 @@ while (task?.status === 'task') {
     if (why) {
       if (batch !== 'run') stop(`practice task ${n} is not a plain payout (${why}); practice has no owner route. Nothing was sent.`, 1);
       if (!claim(key, 'act')) stop(`task ${n} is already being paid or flagged by another run.`);
-      journal({ key, status: 'flag_sent', n, reason: why });
-      const r = await send({ method: 'POST', url: batchUrl(batch), body: { task: tok, flag: 'needs-owner', reason: why.slice(0, 300) }, signal: signal() }, { capture: captureTask(batch), keep });
-      refusedStop(r, key, n, 'flag');
-      if (r.refused) {
-        journal({ key, status: 'not_sent', step: 'flag', why: r.refused });
-        release(key, 'act');
-        stop(`flag of task ${n} not sent: ${r.refused}`);
-      }
-      if (!(r.status >= 200 && r.status < 300)) {
-        journal({ key, event: 'flag_failed', http: r.status, why: r.error });
-        stop(`FLAG UNCLEAR for task ${n}: ${show(r)}. It may have landed: never paid; parked.mjs finishes it if the owner decides it.`);
-      }
-      journal({ key, status: 'waiting_owner', n, reason: why, http: r.status });
-      summary.flagged.push(n);
-      out(`task ${n}: FLAGGED for the owner (${why})`);
-      task = advance(task);
+      task = await flagOwner(n, key, tok, why);
       continue;
     }
 
@@ -177,8 +195,17 @@ while (task?.status === 'task') {
         release(key, 'act');
         stop(`payout of task ${n} not sent: ${p.refused}`);
       }
-      journal({ key, status: 'uncertain', http: p.status, why: p.error, body: p.body?.slice(0, 500) });
-      stop(`UNCERTAIN payout for task ${n}: ${show(p)}. Never sent again; tell the human.`);
+      // No receipt and no refusal: a redirect (real run 2, task 15: 307 "moved" to a host outside the manual, never
+      // followed), a timeout, an error. The batch must not stall (Giovanni, 2026-11-17: "nao pode travar"): in the run
+      // the task goes to the owner with the reason, and the payout is never sent again, by this script or parked.mjs.
+      const moved = p.status >= 300 && p.status < 400;
+      journal({ key, status: moved ? 'moved' : 'uncertain', http: p.status, why: p.error, body: p.body?.slice(0, 500) });
+      const why = moved
+        ? `the payout API answered ${p.status} and points to another address (${hostOf(p.body)}), which the manual does not name; not followed, not paid`
+        : `the payout's result is unclear (${p.status ? `http ${p.status}` : p.error ?? 'no reply'}); it may have gone through, so it is never sent again`;
+      if (batch !== 'run') stop(`${moved ? 'MOVED' : 'UNCERTAIN'} payout for practice task ${n}: ${why}. Tell the human.`);
+      task = await flagOwner(n, key, tok, why);
+      continue;
     }
     amount = a.amount;
     journal({ key, status: 'paid', amount, receipt });

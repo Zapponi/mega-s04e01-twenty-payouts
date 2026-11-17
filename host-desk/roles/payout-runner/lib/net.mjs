@@ -26,6 +26,8 @@ const ATTEMPT_TTL_MS = 3 * 3_600_000;
 /** Until when the attempt in the state file is open (ms), or 0 when there is none. */
 export function attemptOpenUntil(st = readState()) {
   if (!st.ATTEMPT) return 0;
+  // closed by the human (run.mjs NEW_ATTEMPT=1): holds the ATTEMPT_SEEN_AT of the attempt it closed
+  if (st.ATTEMPT_CLOSED_AT && st.ATTEMPT_CLOSED_AT === st.ATTEMPT_SEEN_AT) return 0;
   const until = Date.parse(st.ATTEMPT_EXPIRES_AT ?? '') || Date.parse(st.ATTEMPT_SEEN_AT ?? '') + ATTEMPT_TTL_MS;
   return Number.isFinite(until) ? until : 0;
 }

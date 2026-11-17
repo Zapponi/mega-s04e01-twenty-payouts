@@ -13,7 +13,8 @@ import { spawn } from 'node:child_process';
 import { createWriteStream, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { config, mask } from './lib/net.mjs';
+import { attemptOpenUntil, config, mask, saveState } from './lib/net.mjs';
+import { state } from './lib/flow.mjs';
 import { STATE_FILE } from './extensions/vars.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -38,6 +39,15 @@ if (process.env.READ_ONLY === '1') {
   if (process.env.ALLOW_RUN !== '1') {
     console.error('MODE=run needs ALLOW_RUN=1: the human\'s yes for this run (BRIEF.md "Outside actions approved"). Nothing was started.');
     process.exit(2);
+  }
+  // NEW_ATTEMPT=1, the human's yes to close the open attempt (its run is over: the API, "each fetch starts a new
+  // run"), so the agent fetches the manual once instead of waiting for the attempt to expire (Giovanni 2026-11-17).
+  if (process.env.NEW_ATTEMPT === '1') {
+    const st = state();
+    if (attemptOpenUntil(st) > Date.now()) {
+      saveState({ ATTEMPT_CLOSED_AT: st.ATTEMPT_SEEN_AT });
+      console.log(`[run] NEW_ATTEMPT=1: the attempt fetched ${st.ATTEMPT_SEEN_AT} is closed by the human; the agent fetches the manual once.`);
+    } else console.log('[run] NEW_ATTEMPT=1: no attempt is open; nothing to close.');
   }
   role = 'ROLE.md';
   process.env.ALLOWED_HOSTS = 'hq.mega.dev,pay-s04.mega.dev,verify-s04.mega.dev';

@@ -521,6 +521,65 @@ test('routine: a 200 payout that says refused stops, even with a receipt (Sol D 
   assert.equal(pays().length, 1);
 });
 
+// Real run 2 (2026-11-17), task 15: the payout POST came back 307 "moved" to a host outside the manual; the routine
+// stopped and the batch ran out of time. Giovanni: "nao pode travar".
+const MOVED = { code: 307, body: { status: 'moved', message: 'This payout is handled at the new address.', url: 'https://cdn-s04.mega.dev/SECRETTOKENPATH123/payouts' } };
+
+test('routine: a 307 on a payout is never followed; the task goes to the owner and the batch goes on', async () => {
+  fake.reset({ runTasks: 6, payoutStatus: { 3: MOVED } });
+  await openForRoutine();
+  const r = await run('routine.mjs', 'run');
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /SUMMARY run: answered \[1,2,4,5,6\]; flagged for the owner \[3\]/);
+  assert.match(r.out, /task 3: FLAGGED for the owner \(the payout API answered 307 and points to another address \(cdn-s04\.mega\.dev\)/);
+  assert.equal(pays().filter((h) => h.body.task === token('run', 3)).length, 1, 'the payout of task 3 sent once, never again');
+  assert.ok(journal().some((e) => e.key?.startsWith('run:3:') && e.status === 'moved'));
+  assert.ok(!r.out.includes('SECRETTOKENPATH123'), 'the redirect path is not printed');
+  // the owner says on-file: parked never sends that payout again; decline finishes it
+  fake.parked.set(3, 'on-file');
+  const p = await run('parked.mjs');
+  assert.match(p.out, /STOPPED task 3: a payout was already tried for this task \(moved, http 307\)/);
+  assert.equal(pays().filter((h) => h.body.task === token('run', 3)).length, 1);
+  assert.equal(parkedPosts().length, 0);
+});
+
+test('routine: a 307 task the owner declines is finished as declined by parked', async () => {
+  fake.reset({ runTasks: 2, payoutStatus: { 1: MOVED } });
+  await openForRoutine();
+  assert.equal((await run('routine.mjs', 'run')).code, 0);
+  fake.parked.set(1, 'decline');
+  const p = await run('parked.mjs');
+  assert.equal(p.code, 0, p.out);
+  assert.deepEqual(parkedPosts().map((h) => h.body), [{ task: token('run', 1), done: 'declined' }]);
+  assert.equal(pays().length, 2, 'task 1 tried once, task 2 paid once');
+});
+
+test('NEW_ATTEMPT closes the open attempt: journal status says fetch, and the manual opens a new attempt once', async () => {
+  await fetchManual();
+  assert.match((await fetchManual()).out, /REFUSED .*already fetched/);
+  const st = JSON.parse(readFileSync(env.STATE_FILE, 'utf8'));
+  writeFileSync(env.STATE_FILE, JSON.stringify({ ...st, ATTEMPT_CLOSED_AT: st.ATTEMPT_SEEN_AT }));
+  assert.match((await run('journal.mjs', 'status')).out, /attempt: none open[\s\S]*next: fetch the manual/);
+  assert.match((await fetchManual()).out, /^200 /);
+  assert.match((await fetchManual()).out, /REFUSED .*already fetched/, 'the new attempt is open: one fetch only');
+  assert.equal(fake.manualFetches, 2);
+});
+
+test('routine: a payout with no reply in time goes to the owner as unclear, never resent; the batch goes on', async () => {
+  fake.reset({ runTasks: 4 });
+  await openForRoutine();
+  fake.replyDelay = { 'POST /payouts': 6000 }; // every payout lands late: only task 1 is reached before we change it
+  const first = run('routine.mjs', 'run');
+  await new Promise((ok) => setTimeout(ok, 1000));
+  fake.replyDelay = {};
+  const r = await first;
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /task 1: FLAGGED for the owner \(the payout's result is unclear/);
+  assert.match(r.out, /answered \[2,3,4\]; flagged for the owner \[1\]/);
+  assert.equal(pays().filter((h) => h.body.task === token('run', 1)).length, 1);
+  assert.ok(journal().some((e) => e.key?.startsWith('run:1:') && e.status === 'uncertain'));
+});
+
 test('routine: the pace guard does not open the run when the practice shows 20 tasks would not fit in 6 s', async () => {
   fake.reset({ runTasks: 20 });
   await openForRoutine();

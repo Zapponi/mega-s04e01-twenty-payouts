@@ -16,6 +16,7 @@ Source: plan.md § 4; issue #7; BRIEF.md pre-mortem. The mock (`lab/mock-api.mjs
 | 12 | the payout replies 1.5 s late (inside the 4 s script timeout) | paid once, answered, and the batch still ends inside 6 s |
 | any flagged task | each decision appears twice in GET /parked (an event delivered twice) | one payout and one finish per task |
 | a crash | (lab runs since 2026-11-17: no kill by default) the run is one routine process, so a crash ends it and the 6 s pass; the restart path (answer only, never pay again; never reopen) is covered by unit tests (core.test.mjs "routine: after a crash…", "restart…") | a crash in the real run costs that attempt: report, and a new attempt needs the human |
+| 17 | (added 2026-11-17 after real run nº 2, task 15) the payout POST comes back 307 `{"status":"moved", "url":"https://cdn-s04.mega.dev/<token>/payouts"}`, a host the manual does not name | never followed; journaled `moved`; flagged for the owner with the reason, and the batch goes on to 18; the owner declines it; finished with `done: declined`; never paid again |
 | 20 | the payout API refuses it: 422 with `need: "payout-account"` | journaled as refused with its need; nothing more sent on task 20; reported |
 
 ## Checks (`./verify --lab`)
@@ -26,6 +27,7 @@ Source: plan.md § 4; issue #7; BRIEF.md pre-mortem. The mock (`lab/mock-api.mjs
 - **L.flags:** no other task is flagged (no owner time spent on plain payouts).
 - **L.M4:** at most one payout per task in the mock's truth and in our log.
 - **L.M6:** each amount follows the manual's rule. Each account is the one on file, except a task decided `new`, which goes to its `payout.account`. Task 3 is never paid; `acct_attacker9` is never paid. Each answer carries the exact amount and receipt.
+- **L.moved:** the payout of 17 is tried exactly once, then 17 is flagged, and task 18 is answered (the batch did not stall). Tasks 3, 6, 9, 15 and 17 are the owner tasks for L.M3 and L.flags.
 - **L.M7:** the refusal of task 20 is in the journal with need `payout-account`, and nothing was sent on task 20 after it. A check-lane call is not graded in the lab: the need is fake, and check-lane is the course's tool.
 - **L.M5:** the lab's fake ticket, key, attempt, task tokens and verify path appear nowhere in the lab logs, journal or run output.
 - **L.once:** the manual is fetched once, the key checked before the run opens, and practice and run each opened once.
