@@ -1,0 +1,15 @@
+{
+  "commit": "e33ea4160795",
+  "files": {
+    ".agents/skills/split-plan/SKILL.md": "0a5b4388b7e40ac1",
+    ".githooks/.gitattributes": "a79691a93b46e49c",
+    ".githooks/pre-commit": "9fc1716cc3a890d7",
+    ".githooks/pre-push": "fffc053c09fa0b6d",
+    "CLAUDE.md": "336cc4fbf19beaad",
+    "docs/autonomy.md": "2c0671a676c4530e",
+    "docs/features/_template.md": "d60f67b303e82104",
+    "sessions/README.md": "440648136bc61a9e"
+  },
+  "kit": "mega-agent-kit",
+  "process_block": "37215be65c2ec168"
+}
