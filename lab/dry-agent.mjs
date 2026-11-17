@@ -28,7 +28,11 @@ const code = (file, ...args) =>
     });
   });
 
+// A model takes 1.2 s or more per turn (lab runs 2026-11-17: 1.3–2.3 s per task); 300 ms between steps keeps the
+// runner's kill after task 7 at a turn boundary, as with a model, instead of in the middle of the next payout.
+const THINK_MS = Number(process.env.DRY_THINK_MS || 300);
 for (let step = 0; step < 300; step++) {
+  await new Promise((r) => setTimeout(r, THINK_MS));
   const next = /next: (.*)/.exec((await code('journal.mjs', 'status')).text)?.[1] ?? '';
   if (next.startsWith('nothing left')) break;
   if (next.startsWith('fetch the manual')) {

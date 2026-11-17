@@ -28,7 +28,8 @@ function unitTests() {
   const r = spawnSync(process.execPath, ['--test', ...files], { encoding: 'utf8' });
   const pass = /# pass (\d+)/.exec(r.stdout)?.[1] ?? '0';
   const fail = /# fail (\d+)/.exec(r.stdout)?.[1] ?? '?';
-  check('unit', r.status === 0, `unit tests: ${pass} pass, ${fail} fail (node --test ${relative(ROOT, dir)}/)`);
+  const failing = [...r.stdout.matchAll(/^not ok \d+ - (.+)$/gm)].map((m) => m[1]);
+  check('unit', r.status === 0, `unit tests: ${pass} pass, ${fail} fail (node --test ${relative(ROOT, dir)}/)${failing.length ? `; failing: ${failing.join(' | ')}` : ''}`);
 }
 
 const STATE = join(ROOT, 'host-desk/roles/payout-runner/scripts/state/vars.json');
