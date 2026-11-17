@@ -109,7 +109,8 @@ function encodedSpan(v) {
   const part = (c) => {
     const lit = c.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
     const code = c.charCodeAt(0);
-    return code < 128 ? `(?:${lit}|%${hexCase(code.toString(16).padStart(2, '0'))})` : lit;
+    // %HH, or nested: %25HH, %2525HH … (each %25 is an encoded "%"; Sol re-review 2)
+    return code < 128 ? `(?:${lit}|%(?:25)*${hexCase(code.toString(16).padStart(2, '0'))})` : lit;
   };
   return new RegExp([...v].map(part).join(''), 'g');
 }

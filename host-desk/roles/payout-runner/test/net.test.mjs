@@ -115,6 +115,9 @@ test('masking an encoded secret leaves the JSON around it intact, so a refusal i
   assert.equal(parsed.status, 'refused');
   assert.equal(parsed.need, 'payout-run');
   assert.equal(parsed.message, 'a %22quoted%22 note, t={{TICKET}}');
+  // nested encoding, depths 2–4 (Sol re-review 2)
+  const first = FAKE.TICKET.charCodeAt(0).toString(16);
+  for (const pre of ['%25', '%2525', '%252525']) assert.equal(mask(`x ${pre}${first}${FAKE.TICKET.slice(1)} y`, FAKE), 'x {{TICKET}} y');
 });
 
 test('mask covers raw and URL-encoded values', () => {
