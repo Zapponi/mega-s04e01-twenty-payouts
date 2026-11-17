@@ -25,6 +25,7 @@ export async function startFake() {
       this.refuseAnswer = opts.refuseAnswer ?? null; // n → reply { code, body }
       this.flagReply = opts.flagReply ?? null; // a reply to a flag other than the next task
       this.verifyReply = opts.verifyReply ?? null; // a 200 reply to the key check other than ok
+      this.payoutReply = opts.payoutReply ?? null; // a 200 reply to a payout other than paid
       this.replyDelay = opts.replyDelay ?? {}; // 'POST /run' → ms: processed at once, answered late
       this.attempts = 0;
       this.connections = 0;
@@ -72,6 +73,7 @@ export async function startFake() {
       }
       if (req.url === '/payouts') {
         if (f.payoutDelayMs) await new Promise((r) => setTimeout(r, f.payoutDelayMs));
+        if (f.payoutReply) return json(200, f.payoutReply);
         return json(200, { status: 'paid', receipt: `v1.rcpt_${nOf(b.task)}_${b.account}_${b.amount}`, next: 'Send this receipt with the task\'s answer to the run.' });
       }
       if (req.url === '/practice' || req.url === '/run') {

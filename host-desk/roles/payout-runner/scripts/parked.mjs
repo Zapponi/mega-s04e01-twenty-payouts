@@ -100,8 +100,8 @@ async function act(n, decision, entry, seenAt) {
   try {
     receipt = JSON.parse(p.body)?.receipt;
   } catch {}
+  if (refused(p, n, 'payout')) return; // a refusal stops even when a receipt came with it (Sol review D #2)
   if (!(p.status >= 200 && p.status < 300) || typeof receipt !== 'string' || !receipt) {
-    if (refused(p, n, 'payout')) return;
     journal({ key, status: 'uncertain', step: 'payout', http: p.status, why: p.refused ?? p.error, body: p.body?.slice(0, 500) });
     say(`UNCERTAIN payout for task ${n}: ${show(p)}. It may or may not have gone through. Never sent again; tell the human.`);
     return;

@@ -490,6 +490,58 @@ test('routine: after a crash between payout and answer, it answers only, never p
   assert.match(r2.out, /answered \[1,2\]/);
 });
 
+test('routine: a 200 with no next task before the last one stops, never read as success (Sol C #1)', async () => {
+  fake.reset({ runTasks: 5, over: { 2: { payout: { account: 'acct_other0002' } } }, flagReply: { status: 'ok', message: 'Noted.' } });
+  await openForRoutine();
+  const r = await run('routine.mjs', 'run');
+  assert.notEqual(r.code, 0, r.out);
+  assert.match(r.out, /STOP: the run gave no next task after task 2 of 5/);
+});
+
+test('routine: an open that failed is never re-sent, and no stale task is picked up (Sol D #1)', async () => {
+  await openForRoutine();
+  fake.replyDelay = { 'POST /run': 6000 }; // the open lands, its reply comes after the 4 s timeout
+  const r1 = await run('routine.mjs', 'run');
+  fake.replyDelay = {};
+  assert.match(r1.out, /could not open the run/);
+  assert.ok(!journal().some((e) => e.event === 'opened' && e.batch === 'run'), '"opened" only for an accepted open');
+  const r2 = await run('routine.mjs', 'run');
+  assert.match(r2.out, /open failed or is unclear/);
+  assert.equal(fake.hits.filter((h) => h.body.attempt).length, 1);
+  assert.equal(pays().length, 0);
+});
+
+test('routine: a 200 payout that says refused stops, even with a receipt (Sol D #2)', async () => {
+  fake.reset({ runTasks: 3, payoutReply: { status: 'refused', need: 'payout-account', receipt: 'v1.should-not-count' } });
+  await openForRoutine();
+  const r = await run('routine.mjs', 'run');
+  assert.equal(r.code, 5, r.out);
+  assert.match(r.out, /REFUSED task 1 at payout/);
+  assert.equal(fake.hits.filter((h) => h.body.answer !== undefined).length, 0, 'no answer with that receipt');
+  assert.equal(pays().length, 1);
+});
+
+test('routine: the pace guard does not open the run when the practice shows 20 tasks would not fit in 6 s', async () => {
+  fake.reset({ runTasks: 20 });
+  await openForRoutine();
+  fake.payoutDelayMs = 400; // each practice task costs about 0.4 s: 20 would take about 8 s
+  assert.equal((await run('routine.mjs', 'practice')).code, 0);
+  fake.payoutDelayMs = 0;
+  const r = await run('routine.mjs', 'run');
+  assert.equal(r.code, 6, r.out);
+  assert.match(r.out, /PACE TOO SLOW: 20 tasks would take about \d+ ms, over 5100 ms/);
+  assert.equal(fake.hits.filter((h) => h.path === '/run').length, 0, 'the run was not opened');
+});
+
+test('routine: a fast practice lets the run open, and the pace is printed', async () => {
+  fake.reset({ runTasks: 3 });
+  await openForRoutine();
+  assert.equal((await run('routine.mjs', 'practice')).code, 0);
+  const r = await run('routine.mjs', 'run');
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /PACE: the practice took [\d, ]+ ms per task/);
+});
+
 test('a 429 on the answer is not a refusal: the task stays paid and only the answer may be retried', async () => {
   fake.reset({ runTasks: 2, refuseAnswer: { 1: { code: 429, body: { error: 'slow down' } } } });
   await openRun();

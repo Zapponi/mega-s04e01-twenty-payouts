@@ -54,6 +54,8 @@ export function labChecks({ truth, scenario, journal = [], texts = [], secrets =
   const acts = [...answers, ...run('flag')];
   for (const e of acts) if (ms(e) > deadline) m2.push(`task ${e.n} answered/flagged ${ms(e) - deadline} ms after the deadline`);
   for (const e of truth.filter((x) => x.ev === 'time_out')) m2.push(`time-out refusal at task ${e.n}`);
+  // a served task never answered or flagged (other than the refused 20) is an abandoned batch (Sol review C)
+  for (const t of run('task')) if (t.n !== 20 && !acts.some((e) => e.n === t.n)) m2.push(`task ${t.n} served, never answered or flagged`);
   const lastAct = acts.length ? Math.max(...acts.map(ms)) : NaN;
   const used = Number.isFinite(lastAct) && open ? lastAct - ms(open) : NaN;
   add('L.M2', m2.length === 0, `run limit ${open?.runLimitMs ?? '?'} ms; last answer/flag ${Number.isFinite(used) ? used : '?'} ms after the open${kill ? ` (kill after ${kill.afterN})` : ''}; problems: ${list(m2)}`);

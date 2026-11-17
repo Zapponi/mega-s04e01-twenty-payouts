@@ -61,25 +61,59 @@ function pointerOf(r) {
   }
 }
 
-// open, or pick up where the journal says
+// Pace guard (Sol review C, 2026-11-17): the real run gave 6000 ms for all 20 tasks (KEEP.md). Before opening the run,
+// the practice of this attempt, run by this routine, shows what one task costs on the real hosts (payout + answer). If
+// 20 of them would not fit with a margin, the run is not opened: a refused run cannot be taken back.
+const RUN_BUDGET_MS = Number(process.env.RUN_BUDGET_MS || 6000); // runLimitMs of the real run, 2026-11-17
+const MARGIN = 0.85; // keep 15% of the budget free: the agent's own pick, said so
+if (batch === 'run' && !events().some((e) => e.event === 'opened' && e.batch === 'run' && e.attempt === st.ATTEMPT_SEEN_AT)) {
+  const ev = events();
+  const per = [];
+  for (const e of ev.filter((x) => x.status === 'answered' && x.key?.startsWith('practice:') && x.key.endsWith(`:${st.ATTEMPT_SEEN_AT}`))) {
+    const sent = ev.find((x) => x.key === e.key && x.status === 'sent');
+    if (sent) per.push(Date.parse(e.time) - Date.parse(sent.time));
+  }
+  if (per.length) {
+    const avg = Math.round(per.reduce((a, b) => a + b, 0) / per.length);
+    const need = avg * 20;
+    out(`PACE: the practice took ${per.join(', ')} ms per task (payout + answer); 20 tasks ≈ ${need} ms of the ${RUN_BUDGET_MS} ms budget.`);
+    if (need > RUN_BUDGET_MS * MARGIN) stop(`PACE TOO SLOW: 20 tasks would take about ${need} ms, over ${Math.round(RUN_BUDGET_MS * MARGIN)} ms (85% of ${RUN_BUDGET_MS}). The run was NOT opened. Tell the human.`, 6);
+  } else out('PACE: no practice by the routine in this attempt; nothing measured. Going on.');
+}
+
+// open, or pick up where the journal says. "opened" is journaled only for an accepted open (Sol review D #1).
 let task;
 const opened = events().some((e) => e.event === 'opened' && e.batch === batch && e.attempt === st.ATTEMPT_SEEN_AT);
 if (opened) {
   task = current(batch);
   out(`The ${batch} is already open for this attempt: picking up at ${task?.status === 'task' ? `task ${task.n}` : `reply "${task?.status}"`}.`);
 } else {
-  if (!claim(`open:${batch}:${st.ATTEMPT_SEEN_AT}`, 'open')) stop(`the ${batch} open is unclear for this attempt; never sent twice. Tell the human.`);
+  if (!claim(`open:${batch}:${st.ATTEMPT_SEEN_AT}`, 'open')) stop(`the ${batch} open failed or is unclear for this attempt; never sent twice. Tell the human.`);
   journal({ event: 'opening', batch, attempt: st.ATTEMPT_SEEN_AT });
   const r = await send({ method: 'POST', url: batchUrl(batch), body: { attempt: '{{ATTEMPT}}' }, signal: signal() }, { capture: captureTask(batch), keep });
-  journal({ event: 'opened', batch, attempt: st.ATTEMPT_SEEN_AT, http: r.status, unclear: r.status ? undefined : (r.refused ?? r.error) });
   const ref = r.status ? refusalOf(r) : null;
   if (ref) {
-    journal({ event: 'open_refused', batch, need: ref.need, why: ref.why, http: r.status });
+    journal({ event: 'open_refused', batch, attempt: st.ATTEMPT_SEEN_AT, need: ref.need, why: ref.why, http: r.status });
     stop(`REFUSED opening the ${batch}: ${ref.why}${ref.need ? `; need: ${ref.need}` : ''}`, 5);
   }
-  if (!(r.status >= 200 && r.status < 300)) stop(`could not open the ${batch}: ${show(r)}`);
+  if (!(r.status >= 200 && r.status < 300)) {
+    journal({ event: 'open_failed', batch, attempt: st.ATTEMPT_SEEN_AT, http: r.status, why: r.refused ?? r.error });
+    stop(`could not open the ${batch}: ${show(r)}. Never sent again; tell the human.`);
+  }
+  journal({ event: 'opened', batch, attempt: st.ATTEMPT_SEEN_AT, http: r.status });
   task = current(batch);
   out(`OPENED ${batch}: ${task?.of ?? '?'} tasks, runLimitMs ${task?.runLimitMs ?? '?'}, timeLeftMs ${task?.timeLeftMs ?? '?'}.`);
+}
+
+/**
+ * The reply after an accepted answer or flag must be the next task, or the end after the last one. Anything else
+ * (a 200 with no task before task `of`) stops at once, never read as success (Sol review C #1).
+ */
+function advance(prev) {
+  const nx = current(batch);
+  if (nx?.status === 'task' && Number.isInteger(nx.n) && nx.n > prev.n) return nx;
+  if (nx && nx.status !== 'task' && Number.isInteger(prev.of) && prev.n >= prev.of) return nx;
+  stop(`the ${batch} gave no next task after task ${prev.n} of ${prev.of ?? '?'} (reply: ${JSON.stringify(nx)?.slice(0, 200)}). Never taken for the end: tell the human.`);
 }
 
 while (task?.status === 'task') {
@@ -126,7 +160,7 @@ while (task?.status === 'task') {
       journal({ key, status: 'waiting_owner', n, reason: why, http: r.status });
       summary.flagged.push(n);
       out(`task ${n}: FLAGGED for the owner (${why})`);
-      task = current(batch);
+      task = advance(task);
       continue;
     }
 
@@ -136,8 +170,8 @@ while (task?.status === 'task') {
     try {
       receipt = JSON.parse(p.body)?.receipt;
     } catch {}
+    refusedStop(p, key, n, 'payout'); // a refusal stops even when a receipt came with it (Sol review D #2)
     if (!(p.status >= 200 && p.status < 300) || typeof receipt !== 'string' || !receipt) {
-      refusedStop(p, key, n, 'payout');
       if (p.refused) {
         journal({ key, status: 'not_sent', step: 'payout', why: p.refused });
         release(key, 'act');
@@ -159,6 +193,6 @@ while (task?.status === 'task') {
   journal({ key, status: 'answered', amount, receipt, http: r.status });
   summary.answered.push(n);
   out(`task ${n}: ANSWERED ${amount} EUR`);
-  task = current(batch);
+  task = advance(task);
 }
 finish(0);
