@@ -1,0 +1,50 @@
+{
+  "source": "real course, read-only attempt 2026-11-19T00-55-18-705Z; expected verdicts are our reading (I) until the Codex check and the course (R3)",
+  "settings": {
+    "version": "2026-11-17.515",
+    "commissionPct": 14
+  },
+  "patch": {
+    "files": {
+      "config/house.json": "{\n  \"commissionPct\": 14,\n  \"currency\": \"EUR\"\n}\n",
+      "src/stay.js": "const DAY_MS = 86_400_000;\n\n// Nights of a stay: check-out minus check-in, in whole days.\nexport function nights(checkIn, checkOut) {\n  return (Date.parse(checkOut) - Date.parse(checkIn)) / DAY_MS;\n}\n",
+      "src/batch.js": "import { hostPayout } from './payout.js';\n\n// One payout line per stay of the batch.\nexport function payoutLines(stays) {\n  return stays.map((s) => ({ booking: s.id, account: s.account, amount: hostPayout(s.total) }));\n}\n"
+    },
+    "hunks": [
+      {
+        "id": "h-c0d",
+        "file": "src/stay.js",
+        "message": "fix: count the last night of each stay",
+        "diff": "--- a/src/stay.js\n+++ b/src/stay.js\n@@ -4,3 +4,3 @@\n export function nights(checkIn, checkOut) {\n-  return (Date.parse(checkOut) - Date.parse(checkIn)) / DAY_MS;\n+  return (Date.parse(checkOut) - Date.parse(checkIn)) / DAY_MS + 1;\n }"
+      },
+      {
+        "id": "h-6d2",
+        "file": "src/batch.js",
+        "message": "refactor: name the stay in payoutLines",
+        "diff": "--- a/src/batch.js\n+++ b/src/batch.js\n@@ -4,3 +4,3 @@\n export function payoutLines(stays) {\n-  return stays.map((s) => ({ booking: s.id, account: s.account, amount: hostPayout(s.total) }));\n+  return stays.map((stay) => ({ booking: stay.id, account: stay.account, amount: hostPayout(stay.total) }));\n }"
+      },
+      {
+        "id": "h-fe0",
+        "file": "config/house.json",
+        "message": "chore: house commission 15 %",
+        "diff": "--- a/config/house.json\n+++ b/config/house.json\n@@ -1,3 +1,3 @@\n {\n-  \"commissionPct\": 14,\n+  \"commissionPct\": 15,\n   \"currency\": \"EUR\""
+      }
+    ]
+  },
+  "expected": {
+    "h-c0d": "flag",
+    "h-6d2": "pass",
+    "h-fe0": "flag"
+  },
+  "cases": {
+    "h-c0d": [
+      "R02",
+      "R09"
+    ],
+    "h-6d2": "R02",
+    "h-fe0": [
+      "R02",
+      "R07"
+    ]
+  }
+}

@@ -2,7 +2,7 @@
 // the system prompt. Model: MODEL (e.g. openrouter/<model id>), else Pi's default. stdin is closed, because `pi -p`
 // waits for stdin when it is an open pipe.
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -12,6 +12,24 @@ const here = dirname(fileURLToPath(import.meta.url));
 if (!existsSync(join(here, '..', '..', 'why'))) {
   console.error('Install not complete: `host-desk/why/` missing. Unzip the reviewer zip where you unzipped the S04E01 zip.');
   process.exit(1);
+}
+
+// Lab mode (lab/reviewer/run-lab.mjs): LAB_URL is the mock, VARS_FILE the lab's fake vars, HOSTS_FILE the mock host,
+// LAB_OUT the scenario folder; ROLE.md is copied there with the course URL swapped for the mock. Without LAB_URL these
+// are deleted, so the real role never reads a lab file and a stray variable cannot redirect it.
+const COURSE = 'https://hq.mega.dev/challenges/looks-good-to-me';
+let rolePath = 'ROLE.md';
+if (process.env.LAB_URL) {
+  for (const k of ['VARS_FILE', 'HOSTS_FILE', 'LAB_OUT']) {
+    if (!process.env[k]) {
+      console.error(`Lab mode needs ${k}.`);
+      process.exit(2);
+    }
+  }
+  rolePath = join(process.env.LAB_OUT, 'ROLE.lab.md');
+  writeFileSync(rolePath, readFileSync(join(here, 'ROLE.md'), 'utf8').split(COURSE).join(process.env.LAB_URL));
+} else {
+  for (const k of ['VARS_FILE', 'HOSTS_FILE', 'LAB_OUT', 'LAB_EXPECTED']) delete process.env[k];
 }
 
 const args = [
@@ -26,7 +44,7 @@ const args = [
   '-e', 'extensions/vars.mjs',
   '-e', 'extensions/http.mjs',
   '-e', 'extensions/code.mjs',
-  '--system-prompt', 'ROLE.md',
+  '--system-prompt', rolePath,
   ...(process.env.MODEL ? ['--model', process.env.MODEL] : []),
   'Start.',
 ];

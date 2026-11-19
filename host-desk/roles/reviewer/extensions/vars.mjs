@@ -12,7 +12,9 @@ const DESK = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 /** name → value, from vars.json. Missing file or bad JSON → no vars. */
 export function loadVars() {
   try {
-    const raw = JSON.parse(readFileSync(join(DESK, 'vars.json'), 'utf8'));
+    // Lab mode (run.mjs with LAB_URL) reads the lab's fake vars; outside it run.mjs deletes VARS_FILE, so this is vars.json.
+    const file = process.env.LAB_URL && process.env.VARS_FILE ? process.env.VARS_FILE : join(DESK, 'vars.json');
+    const raw = JSON.parse(readFileSync(file, 'utf8'));
     return Object.fromEntries(Object.entries(raw).filter(([k, v]) => /^[A-Z][A-Z0-9_]*$/.test(k) && typeof v === 'string'));
   } catch {
     return {};

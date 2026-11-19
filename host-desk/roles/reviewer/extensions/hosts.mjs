@@ -10,7 +10,9 @@ const ROLE = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 /** name → the hosts it may reach. Missing file or bad JSON → no host for any secret. */
 export function loadHosts() {
   try {
-    const raw = JSON.parse(readFileSync(join(ROLE, 'hosts.json'), 'utf8'));
+    // Lab mode (run.mjs with LAB_URL) reads the lab's hosts file (the mock only); outside it run.mjs deletes HOSTS_FILE.
+    const file = process.env.LAB_URL && process.env.HOSTS_FILE ? process.env.HOSTS_FILE : join(ROLE, 'hosts.json');
+    const raw = JSON.parse(readFileSync(file, 'utf8'));
     return Object.fromEntries(Object.entries(raw).filter(([, v]) => Array.isArray(v)).map(([k, v]) => [k, v.map((h) => String(h).toLowerCase())]));
   } catch {
     return {};
