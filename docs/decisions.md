@@ -66,3 +66,4 @@ A changed decision gets a new line that names the one it replaces. Findings (wha
 - 2026-11-18 who: human — "Quero que voce cheque os casos vs o enunciado oficial, no final, ele tem que medir a aderencia ao enunciado. Tem confabulacao sua?": lab/CASES.md v2 com fonte O/E/I por caso, matriz F1–F22 e ./verify --adherence; casos I não contam para a aderência.
 - 2026-11-19 who: human — "As regras que deveriam ser de codigo, serao de codigo?": plan § 2 / #17 ganham duas regras em código: a trava exige as leituras de /settings e /patch antes do /review, e house-check.mjs fixa o veredito da comissão contra o /settings; padrões das notas why/ só como fatos.
 - 2026-11-19 who: human — "sim" (à pergunta das 26 sessões): lab do revisor com o modelo, 2 rodadas × 13 cenários = 26 sessões do Haiku 5.5 na assinatura.
+- 2026-11-19 who: human — "Sim, mais 13 (Recommended)": total de 39 sessões no lab do revisor (rodada 1 achou o bug da trava; 2 rodadas novas depois da correção).
