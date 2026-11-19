@@ -81,3 +81,4 @@ A changed decision gets a new line that names the one it replaces. Findings (wha
 - 2026-11-19 who: human — "Claim agora, pular rehearse (Recommended)": pula o /rehearse e o check-flow --release (9 linhas do pré-mortem sem resultado) e faz o claim-challenge agora; pré-mortem, /sol-loop do diff inteiro e PR para main depois do claim.
 - 2026-11-19 who: human — "1 rodada nova do revisor (Recommended)": o ./verify padrão agora checa R1–R3 (Sol whole-diff A #4) e o R2 falhava pelo R29 da rodada 3; uma rodada nova do lab do revisor com Haiku 5.5, 13 sessões, sem editar arquivos durante a rodada.
 - 2026-11-19 who: human — "Sim, 2 revisores de novo (Recommended)": re-revisão do /sol-loop do diff inteiro com os dois papéis (dinheiro, segredos), depois de 8 bloqueios corrigidos, A2 no Later e B4 recusado.
+- 2026-11-19 who: human — "Merge agora (Recommended)": merge do PR #24 (s04e02-reviewer → main), classe high, depois da limpeza do fim do trabalho.
