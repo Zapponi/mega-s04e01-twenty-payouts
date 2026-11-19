@@ -21,11 +21,11 @@ Before this issue the runner still pointed at S04E01 (`twenty-payouts`, no commi
 
 | Check | Shown by | Result |
 |---|---|---|
-| Unit tests pass | `node --test host-desk/roles/payout-runner/test/` | |
-| Every batch case B01–B28 passes on a dry run (no model) | `./verify --lab` on the dry agent's output | |
-| The same on two model runs in a row (Haiku 5.5, session count asked first) | `./verify --lab` on each run | |
-| Batch sentences F11–F19, F21 of the adherence matrix pass | `./verify --adherence` | |
-| No secret in repo, logs, journal, lab output | `./verify` S1 | |
+| Unit tests pass | `node --test host-desk/roles/payout-runner/test/` | match: 125/125 with the reviewer's (1a72998) |
+| Every batch case B01–B28 passes on a dry run (no model) | `./verify --lab` on the dry agent's output | match: lab/out/2026-11-19T02-45-31-143Z-dry |
+| The same on two model runs in a row (Haiku 5.5, session count asked first) | `./verify --lab` on each run | match: lab/out/2026-11-19T03-24-39-601Z-model and …03-28-09-016Z-model, 1 session each, all checks PASS. Two earlier runs failed: the code tool ran the pi binary (fixed in 1a72998, KEEP.md) |
+| Batch sentences F11–F19, F21 of the adherence matrix pass | `./verify --adherence` | match: 21/22 PASS; F7 FAIL is the reviewer's R29 (rerun planned at slice 3) |
+| No secret in repo, logs, journal, lab output | `./verify` S1 | match in the lab (L.M5); real files: scan of 2026-11-19 03:25Z, 0 hits |
 | One review of the whole diff by another model family | `/sol-loop` + `review-mark.py` | |
 
 ## Premises
