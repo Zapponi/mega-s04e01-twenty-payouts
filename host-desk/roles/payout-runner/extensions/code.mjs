@@ -2,12 +2,22 @@
 // printed. The values in vars.json reach the script as environment variables (PAYOUT_KEY, …), the rest of the
 // environment does not; the model sees only the script's output.
 import { spawn } from 'node:child_process';
-import { existsSync, realpathSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, realpathSync } from 'node:fs';
 import * as nodePath from 'node:path';
 import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadVars } from './vars.mjs';
-import { mask } from '../lib/net.mjs';
+import { config, mask } from '../lib/net.mjs';
+
+/** One line per code call in <LOG_DIR>/code.jsonl (masked): what the model ran and what it saw (lab run 2026-11-19: the
+ * model reported outputs nobody could check). */
+function logCall(record) {
+  try {
+    const dir = config().logDir;
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(join(dir, 'code.jsonl'), `${JSON.stringify({ time: new Date().toISOString(), run: process.env.RUN_ID ?? '', ...record })}\n`);
+  } catch {}
+}
 
 const SCRIPTS = join(dirname(dirname(fileURLToPath(import.meta.url))), 'scripts');
 const TIMEOUT_MS = 120_000;
@@ -67,7 +77,9 @@ export default function (pi) {
     },
     async execute(_id, p, signal) {
       const file = script(p.file);
+      const t0 = Date.now();
       if (!file) {
+        logCall({ file: String(p.file).slice(0, 100), args: (p.args ?? []).map((a) => mask(String(a)).slice(0, 200)), refused: 'no such file' });
         return { content: [{ type: 'text', text: `No such file in scripts/: ${p.file}` }], details: { failed: true } };
       }
       const out = await new Promise((done) => {
@@ -81,10 +93,14 @@ export default function (pi) {
         let text = '';
         child.stdout.on('data', (d) => (text += d));
         child.stderr.on('data', (d) => (text += d));
-        child.on('error', (e) => done(`could not run: ${mask(e.message)}`));
+        child.on('error', (e) => {
+          logCall({ file: p.file, args: (p.args ?? []).map((a) => mask(String(a)).slice(0, 200)), error: mask(e.message), aborted: !!signal?.aborted, ms: Date.now() - t0 });
+          done(`could not run: ${mask(e.message)}`);
+        });
         // Masked before the model sees it (plan.md § 0): a script that prints a secret by mistake shows {{NAME}}.
-        child.on('close', (code) => {
+        child.on('close', (code, sig) => {
           const shown = mask(text);
+          logCall({ file: p.file, args: (p.args ?? []).map((a) => mask(String(a)).slice(0, 200)), exit: code, signal: sig, aborted: !!signal?.aborted, ms: Date.now() - t0, out: shown.slice(0, MAX_OUT) });
           done(`exit ${code}\n${shown.length > MAX_OUT ? `${shown.slice(0, MAX_OUT)}\n…(cut)` : shown}`);
         });
       });
