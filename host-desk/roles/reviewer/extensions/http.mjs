@@ -76,6 +76,7 @@ export async function guardedRequest(p, signal) {
   const seen = session.reads.get(key) ?? {};
 
   let reservation = null;
+  let sentHunks = null;
   if (r.path === '/review') {
     if (seen.settings?.status !== 200 || seen.patch?.status !== 200) return fail(`read GET /settings and GET /patch of this attempt (both 200) before POST /review; this session has settings ${seen.settings?.status ?? 'not read'}, patch ${seen.patch?.status ?? 'not read'}`);
     let parsed;
@@ -92,7 +93,8 @@ export async function guardedRequest(p, signal) {
     mkdirSync(stateDir(), { recursive: true });
     reservation = join(stateDir(), `review-${key}.json`);
     try {
-      writeFileSync(reservation, JSON.stringify({ reservedAt: new Date().toISOString(), hunks: parsed.findings.map((f) => f.hunk) }), { flag: 'wx' });
+      sentHunks = parsed.findings.map((f) => f.hunk);
+      writeFileSync(reservation, JSON.stringify({ reservedAt: new Date().toISOString(), hunks: sentHunks }), { flag: 'wx' });
     } catch {
       return fail('a review for this attempt was already sent; the course takes one POST /review per attempt');
     }
@@ -107,10 +109,10 @@ export async function guardedRequest(p, signal) {
     text = await res.text();
   } catch (e) {
     const why = e?.name === 'TimeoutError' ? `no answer in ${TIMEOUT_MS / 1000} s` : (e?.cause?.message ?? e?.message ?? String(e));
-    if (reservation) writeFileSync(reservation, JSON.stringify({ uncertain: true, why, at: new Date().toISOString() }));
+    if (reservation) writeFileSync(reservation, JSON.stringify({ uncertain: true, why, at: new Date().toISOString(), hunks: sentHunks }));
     return { content: [{ type: 'text', text: `request failed: ${mask(why, vars)}${reservation ? ' — the review may or may not have arrived; it is never sent again for this attempt' : ''}` }], details: { failed: true } };
   }
-  if (reservation) writeFileSync(reservation, JSON.stringify({ status: res.status, at: new Date().toISOString(), reply: mask(text, vars).slice(0, 2000) }));
+  if (reservation) writeFileSync(reservation, JSON.stringify({ status: res.status, at: new Date().toISOString(), hunks: sentHunks, reply: mask(text, vars).slice(0, 2000) }));
 
   // Merge into the state as it is now, not as it was when this request started: the model often reads /settings
   // and /patch at the same time, and a stale copy would erase the other read (lab run 1, 2026-11-19).

@@ -200,7 +200,8 @@ async function r3Real() {
   const files = existsSync(d) ? readdirSync(d).filter((f) => /^review-real-.+\.json$/.test(f)).sort() : [];
   if (!files.length) return { ok: false, detail: 'no real review of the improved reviewer saved yet (plan.md § 3)', pending: true };
   const r = JSON.parse(readFileSync(join(d, files.at(-1)), 'utf8'));
-  return { ok: accepted(r.status, r.body), detail: `${files.at(-1)}: ${r.status} ${JSON.stringify(r.body).slice(0, 200)}` };
+  const ok = accepted(r.status, r.body) && r.unexpired === true && r.sameHunks === true && !r.uncertain;
+  return { ok, detail: `${files.at(-1)}: ${r.status} ${JSON.stringify(r.body).slice(0, 200)}; unexpired ${r.unexpired}; hunks = patch ${r.sameHunks}` };
 }
 
 async function sliceOne() {
