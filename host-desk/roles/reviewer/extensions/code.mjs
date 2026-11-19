@@ -9,6 +9,15 @@ import { fileURLToPath } from 'node:url';
 import { loadVars } from './vars.mjs';
 
 const SCRIPTS = join(dirname(dirname(fileURLToPath(import.meta.url))), 'scripts');
+// The Node that runs a script: never process.execPath alone. In a compiled Pi (Pi 1.5.2 from nix is one binary)
+// process.execPath is the pi binary itself, and "pi <file> <args>" starts a whole new agent session with every
+// built-in tool and the default model: lab run 2026-11-19, 55 hidden Opus sessions ran in place of the scripts.
+// run.mjs (plain Node) passes its own path as HOST_NODE; anything not named node is refused.
+export function nodeBin(env = process.env, execPath = process.execPath) {
+  const c = env.HOST_NODE || execPath;
+  return typeof c === 'string' && nodePath.isAbsolute(c) && /^node(\.exe)?$/i.test(nodePath.basename(c)) ? c : null;
+}
+
 const TIMEOUT_MS = 120_000;
 const MAX_OUT = 20_000;
 
@@ -61,8 +70,12 @@ export default function (pi) {
       if (!file) {
         return { content: [{ type: 'text', text: `No such file in scripts/: ${p.file}` }], details: { failed: true } };
       }
+      const node = nodeBin();
+      if (!node) {
+        return { content: [{ type: 'text', text: 'Cannot run scripts: no Node binary (HOST_NODE). Start the role with run.mjs. Nothing was run.' }], details: { failed: true } };
+      }
       const out = await new Promise((done) => {
-        const child = spawn(process.execPath, [file, ...(p.args ?? [])], {
+        const child = spawn(node, [file, ...(p.args ?? [])], {
           cwd: SCRIPTS,
           env: { ...basics(), ...loadVars() },
           stdio: ['ignore', 'pipe', 'pipe'],

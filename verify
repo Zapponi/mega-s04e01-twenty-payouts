@@ -25,13 +25,15 @@ const REVIEWER_OUT = join(ROOT, 'lab/out');
 const all = args.includes('--all');
 
 const results = [];
+const unitPassed = new Set(); // names of the passing unit tests (TAP), for the lab cases shown by a unit test
 const check = (id, ok, detail) => results.push({ id, ok, detail });
 
 function unitTests() {
   const dirs = ['host-desk/roles/payout-runner/test', 'host-desk/roles/reviewer/test'].map((d) => join(ROOT, d)).filter(existsSync);
   const dir = join(ROOT, 'host-desk/roles');
   const files = dirs.flatMap((d) => readdirSync(d).filter((f) => f.endsWith('.test.mjs')).map((f) => join(d, f)));
-  const r = spawnSync(process.execPath, ['--test', ...files], { encoding: 'utf8' });
+  const r = spawnSync(process.execPath, ['--test', '--test-reporter=tap', ...files], { encoding: 'utf8' });
+  for (const m of r.stdout.matchAll(/^ok \d+ - (.+?)(?: # .*)?$/gm)) unitPassed.add(m[1].replace(/\\#/g, '#'));
   const pass = /(?:#|ℹ) pass (\d+)/.exec(r.stdout)?.[1] ?? '0';
   const fail = /(?:#|ℹ) fail (\d+)/.exec(r.stdout)?.[1] ?? '?';
   const failing = [...r.stdout.matchAll(/^not ok \d+ - (.+)$/gm)].map((m) => m[1]);
@@ -147,12 +149,26 @@ function mustChecks() {
 }
 
 // --lab [dir]: the lab checks (proof/lab.mjs, lab/EXPECTED.md) on one lab run, the latest under lab/out/ by default.
-async function labRun() {
+/** The latest finished batch lab run (not a reviewer run), or the one given; `agent` narrows it ('dry', 'model'). */
+function batchRun(given, agent) {
   const outDir = join(ROOT, 'lab/out');
-  const given = args[args.indexOf('--lab') + 1];
-  const runs = existsSync(outDir) ? readdirSync(outDir).filter((d) => existsSync(join(outDir, d, 'truth.jsonl')) && existsSync(join(outDir, d, 'done.json'))).sort() : [];
-  const dir = given && !given.startsWith('--') ? join(ROOT, given) : runs.length ? join(outDir, runs.at(-1)) : null;
+  const runs = existsSync(outDir) ? readdirSync(outDir).filter((d) => !d.startsWith('reviewer-') && existsSync(join(outDir, d, 'truth.jsonl')) && existsSync(join(outDir, d, 'done.json')) && (!agent || d.endsWith(`-${agent}`))).sort() : [];
+  return given && !given.startsWith('--') ? join(ROOT, given) : runs.length ? join(outDir, runs.at(-1)) : null;
+}
+
+async function labRun() {
+  const dir = batchRun(args[args.indexOf('--lab') + 1]);
   if (!dir || !existsSync(join(dir, 'truth.jsonl'))) return check('lab', false, 'no finished lab run under lab/out/: run node lab/run-lab.mjs first');
+  const { lab } = await batchLab(dir);
+  console.log(`lab run: ${relative(ROOT, dir)}`);
+  for (const r of lab) check(r.id, r.ok, r.detail);
+  // S04E02: every batch case of lab/CASES.md (B01–B28), from those checks and the unit tests
+  const { batchCases } = await import('./proof/lab.mjs');
+  for (const [id, r] of batchCases(lab, unitPassed)) check(`case ${id}`, r.ok, r.detail);
+}
+
+/** The lab checks of one batch lab run. */
+async function batchLab(dir) {
   const { labChecks } = await import('./proof/lab.mjs');
   const { scenario, LAB_VARS } = await import('./lab/mock-api.mjs');
   const texts = [...walk(join(dir, 'logs')), ...walk(join(dir, 'journal')), ...walk(join(dir, 'agent'))].map((f) => ({ name: relative(ROOT, f), text: readFileSync(f, 'utf8') }));
@@ -165,8 +181,7 @@ async function labRun() {
   try {
     kill = JSON.parse(readFileSync(join(dir, 'kill.json'), 'utf8'));
   } catch {}
-  console.log(`lab run: ${relative(ROOT, dir)}`);
-  for (const r of labChecks({ truth: readJsonl(join(dir, 'truth.jsonl')), scenario: scenario(), journal: readJsonl(join(dir, 'journal/journal.jsonl')), texts, secrets, kill })) check(r.id, r.ok, r.detail);
+  return { lab: labChecks({ truth: readJsonl(join(dir, 'truth.jsonl')), scenario: scenario(), journal: readJsonl(join(dir, 'journal/journal.jsonl')), texts, secrets, kill }) };
 }
 
 // The latest finished reviewer lab run, or the one named after --lab-reviewer; `agent` narrows it (e.g. 'model').
@@ -233,6 +248,17 @@ async function adherenceReport() {
   if (!model) results.delete('R00d');
   const r3 = await r3Real();
   if (!r3.pending) results.set('R3real', { ...r3, from: 'real course' });
+  // batch cases: the latest model lab run of the batch, else the latest dry one (a dry result stays PENDING). The
+  // cases a unit test shows need the unit run, so --adherence runs the unit tests when a batch lab run exists.
+  const bModel = batchRun(null, 'model');
+  const bDir = bModel ?? batchRun(null, 'dry');
+  if (bDir) {
+    unitTests();
+    const { batchCases } = await import('./proof/lab.mjs');
+    const { lab } = await batchLab(bDir);
+    for (const [id, r] of batchCases(lab, unitPassed)) results.set(id, { ...r, from: bModel ? 'model lab' : 'dry lab only' });
+    console.log(`batch cases from ${relative(ROOT, bDir)}`);
+  }
   const a = adherence(ROOT, results);
   console.log(`adherence to the official statement (lab/CASES.md), reviewer cases from ${dir ? relative(ROOT, dir) : 'no lab run'}:`);
   for (const r of a.rows) console.log(`${r.status.padEnd(7)} ${r.id}: ${r.text.slice(0, 90)}\n         ${r.detail}`);

@@ -12,8 +12,36 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 const DAY = 86_400_000;
 const isoDate = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(`${s}T00:00:00Z`));
 
-/** { ok: true, nights, amount } or { ok: false, why }. Never guesses a missing or odd field. */
-export function amountOf(booking) {
+/**
+ * The host's payout (S04E02 manual: "The host gets the stay total minus the house commission, in whole EUR. The
+ * house's current settings: `GET /settings`."; why/payout-rounding.md: round down, `Math.floor`):
+ *   amount = Math.floor(total × (1 − commissionPct/100)), commissionPct from /settings of this attempt.
+ * Computed exactly in integers; when the float form of the same rule rounds to another euro (e.g. 100 × (1 − 0.07)
+ * = 92.999…), the two readings disagree and the task goes to the owner instead of guessing which one the course uses.
+ * { ok: true, nights, total, amount } or { ok: false, why }. Never guesses a missing or odd field, or a missing rate.
+ */
+export function amountOf(booking, commissionPct) {
+  const t = totalOf(booking);
+  if (!t.ok) return t;
+  if (typeof commissionPct !== 'number' || !Number.isFinite(commissionPct) || commissionPct < 0 || commissionPct >= 100) return { ok: false, why: `no usable commissionPct from /settings of this attempt (${JSON.stringify(commissionPct)})` };
+  const exact = exactFloor(t.total, commissionPct);
+  const float = Math.floor(t.total * (1 - commissionPct / 100));
+  if (exact === null || exact !== float) return { ok: false, why: `the payout rule gives ${exact} or ${float} EUR for total ${t.total} at ${commissionPct} % (rounding of the commission is unclear)` };
+  if (exact < 1) return { ok: false, why: `the payout comes to ${exact} EUR` };
+  return { ok: true, nights: t.nights, total: t.total, amount: exact };
+}
+
+/** floor(total × (100 − pct) / 100) in integers; pct may carry up to 6 decimals. null if it cannot be exact. */
+function exactFloor(total, pct) {
+  const scale = 1_000_000;
+  const p = Math.round(pct * scale);
+  if (Math.abs(p / scale - pct) > 1e-12) return null;
+  const num = BigInt(total) * BigInt(100 * scale - p);
+  return Number(num / BigInt(100 * scale));
+}
+
+/** { ok: true, nights, total } or { ok: false, why }: the manual's stay total (nights × nightly rate + cleaning fee). */
+export function totalOf(booking) {
   if (!booking || typeof booking !== 'object') return { ok: false, why: 'no booking in the task' };
   const { checkIn, checkOut, nightlyRate, cleaningFee, currency } = booking;
   if (!isoDate(checkIn) || !isoDate(checkOut)) return { ok: false, why: 'checkIn/checkOut missing or not YYYY-MM-DD' };
@@ -22,7 +50,7 @@ export function amountOf(booking) {
   if (!Number.isInteger(cleaningFee) || cleaningFee < 0) return { ok: false, why: 'cleaningFee missing or not a whole number' };
   const nights = (Date.parse(`${checkOut}T00:00:00Z`) - Date.parse(`${checkIn}T00:00:00Z`)) / DAY;
   if (!Number.isInteger(nights) || nights < 1) return { ok: false, why: `nights = ${nights}, not a whole number of at least 1` };
-  return { ok: true, nights, amount: nights * nightlyRate + cleaningFee };
+  return { ok: true, nights, total: nights * nightlyRate + cleaningFee };
 }
 
 // The fields a plain task carries (the real practice replies, KEEP.md). Anything else in the booking or the payout

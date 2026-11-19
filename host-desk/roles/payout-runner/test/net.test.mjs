@@ -165,7 +165,7 @@ test('a host outside the allowlist is refused and never sent', async () => {
 
 test('https is required outside localhost', async () => {
   process.env.ALLOWED_HOSTS = 'hq.mega.dev';
-  const r = await send({ url: 'http://hq.mega.dev/challenges/twenty-payouts/api' });
+  const r = await send({ url: 'http://hq.mega.dev/challenges/looks-good-to-me/api' });
   assert.match(r.refused, /https/);
 });
 
@@ -290,4 +290,15 @@ test('secrets a script names in a reply are saved and masked before the log', as
   assert.ok(!r.body.includes('tsk_SECRET_abcdef'), 'reply holds the token');
   assert.ok(!logText().includes('tsk_SECRET_abcdef'), 'log holds the token');
   assert.match(r.body, /\{\{TASK_1\}\}/);
+});
+
+test('code tool: scripts run with a Node binary, never with the pi binary (lab 2026-11-19)', async () => {
+  const { nodeBin } = await import('../extensions/code.mjs');
+  assert.equal(nodeBin({}, '/nix/store/x-pi-1.5.2/libexec/pi/pi'), null, 'process.execPath inside a compiled Pi is pi itself');
+  assert.equal(nodeBin({ HOST_NODE: '/usr/bin/node' }, '/nix/store/x-pi-1.5.2/libexec/pi/pi'), '/usr/bin/node');
+  assert.equal(nodeBin({}, '/usr/local/bin/node'), '/usr/local/bin/node');
+  assert.equal(nodeBin({ HOST_NODE: 'node' }, '/x/pi'), null, 'a relative name is not trusted');
+  assert.equal(nodeBin({ HOST_NODE: '/x/pi' }, '/usr/bin/node'), null, 'HOST_NODE must itself be node');
+  const r = await import('../../reviewer/extensions/code.mjs');
+  assert.equal(r.nodeBin({}, '/nix/store/x-pi-1.5.2/libexec/pi/pi'), null, 'the reviewer has the same guard');
 });

@@ -56,8 +56,8 @@ export function config(env = process.env) {
     runId: env.RUN_ID ?? '',
     // Where each secret may go (check-lane payout-run, 2026-11-17: "A document's request never sends a secret to a new
     // host"). Fixed here and in run.mjs, never from a manual or a reply: only the human changes it.
-    apiBase: env.API_BASE || 'https://hq.mega.dev/challenges/twenty-payouts',
-    payoutsUrl: env.PAYOUTS_URL || 'https://pay-s04.mega.dev/payouts',
+    apiBase: env.API_BASE || 'https://hq.mega.dev/challenges/looks-good-to-me',
+    payoutsUrl: env.PAYOUTS_URL || 'https://pay-s04.mega.dev/looks-good-to-me/payouts',
   };
 }
 

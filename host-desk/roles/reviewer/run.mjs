@@ -55,6 +55,8 @@ if (process.platform === 'win32' && process.env.MODEL && !/^[\w./:@-]+$/.test(pr
   console.error('MODEL may hold letters, digits and . / : @ - _ only.');
   process.exit(1);
 }
+// the code tool runs scripts with this Node, never with process.execPath inside Pi (extensions/code.mjs nodeBin)
+process.env.HOST_NODE = process.execPath;
 const child = spawn(process.platform === 'win32' ? 'pi.cmd' : 'pi', args, {
   cwd: here,
   stdio: ['ignore', 'inherit', 'inherit'],
