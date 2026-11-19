@@ -230,11 +230,12 @@ export function fromManual(rawText) {
   const out = {};
   const acct = /account on file is (acct_[A-Za-z0-9]+)/i.exec(text)?.[1];
   if (acct) out.ACCOUNT_ON_FILE = acct;
-  const path = /https:\/\/verify-s04\.mega\.dev\/([A-Za-z0-9_-]{8,})/.exec(text)?.[1];
-  if (path) out.VERIFY_PATH = path;
+  // the whole path, every segment (S04E02: "verify-s04.mega.dev/looks-good-to-me/<token>"; taking only the first segment
+  // masked every "looks-good-to-me" as {{VERIFY_PATH}} and left the token in the clear, real batch 2026-11-19)
+  const path = /https:\/\/verify-s04\.mega\.dev\/([A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*)/.exec(text)?.[1];
+  if (path && path.length >= 16) out.VERIFY_PATH = path;
   return out;
 }
-
 /**
  * Writes run-time secrets into the state file, before anything is logged, so they are masked as {{NAME}}. A name that
  * already holds another value keeps the old one as <NAME>_PREV_<n>, so old logs stay masked.

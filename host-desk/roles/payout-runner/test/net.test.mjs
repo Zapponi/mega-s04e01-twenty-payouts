@@ -302,3 +302,10 @@ test('code tool: scripts run with a Node binary, never with the pi binary (lab 2
   const r = await import('../../reviewer/extensions/code.mjs');
   assert.equal(r.nodeBin({}, '/nix/store/x-pi-1.5.2/libexec/pi/pi'), null, 'the reviewer has the same guard');
 });
+
+test('fromManual takes the whole verify path, every segment (S04E02 real batch: only "looks-good-to-me" was taken)', async () => {
+  const { fromManual } = await import('../lib/net.mjs');
+  const raw = JSON.stringify({ manual: '- Before a run, check the payout key: GET https://verify-s04.mega.dev/looks-good-to-me/AbC_123-xyzTOKENtoken456 with the header X-Payout-Key: {{PAYOUT_KEY}}.\n- The account on file is acct_1234567890.' });
+  assert.deepEqual(fromManual(raw), { ACCOUNT_ON_FILE: 'acct_1234567890', VERIFY_PATH: 'looks-good-to-me/AbC_123-xyzTOKENtoken456' });
+  assert.equal(fromManual(JSON.stringify({ manual: 'GET https://verify-s04.mega.dev/short' })).VERIFY_PATH, undefined, 'a short path is no secret to mask');
+});

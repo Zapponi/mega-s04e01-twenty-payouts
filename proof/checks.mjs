@@ -205,9 +205,12 @@ export function checks({ records, journal = [], manualText = '', checkLane = [],
 
   // M4: no double payout, by task and by booking + amount, in the log and the journal.
   const pays = writes.filter((w) => w.kind === 'payout');
+  // a payout the API sent elsewhere (3xx "moved", not followed) moved no money (see M6): it is not a first payout, so
+  // the one later send the owner approved is not a double (real batch 2026-11-19, task 12)
+  const moved = (p) => p.status >= 300 && p.status < 400;
   const perTask = new Map();
   const perPair = new Map();
-  for (const p of pays) {
+  for (const p of pays.filter((x) => !moved(x))) {
     perTask.set(p.n, (perTask.get(p.n) ?? 0) + 1);
     const pair = `${tasks.get(p.n)?.booking?.id ?? `task ${p.n}`}/${p.req?.amount}`;
     perPair.set(pair, (perPair.get(pair) ?? 0) + 1);
@@ -216,6 +219,8 @@ export function checks({ records, journal = [], manualText = '', checkLane = [],
   const opened = Date.parse(m.first.time);
   const sentKeys = new Map();
   for (const e of journal) if (e.status === 'sent' && e.key?.startsWith('run:') && Date.parse(e.time) >= opened - 60_000) sentKeys.set(e.key, (sentKeys.get(e.key) ?? 0) + 1);
+  // each journaled 'moved' answers one 'sent' that moved no money
+  for (const e of journal) if (e.status === 'moved' && sentKeys.has(e.key)) sentKeys.set(e.key, sentKeys.get(e.key) - 1);
   for (const [k, c] of sentKeys) if (c > 1) twice.push(`journal ${k} sent ×${c}`);
   add('M4', twice.length === 0, `${pays.length} payout request(s) in the log; doubles: ${list([...new Set(twice)])}`);
 

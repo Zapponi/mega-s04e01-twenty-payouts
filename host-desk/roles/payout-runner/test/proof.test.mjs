@@ -238,3 +238,17 @@ test('M1 does not count an end reply whose message says it is queued or pending,
   assert.equal(ok.ok, true, ok.detail);
   assert.match(ok.detail, /end reply: 200 \{"message":"All 4 tasks are answered\."\}/);
 });
+
+test('M4: a payout that came back 3xx (moved, not followed) and its one owner-approved repay are not a double (real batch task 12)', () => {
+  const c = clone();
+  const i = find(c.records, (r) => /\/payouts$/.test(r.url) && /TASK_RUN_4/.test(r.reqBody));
+  const moved = { ...structuredClone(c.records[i]), status: 307, resBody: '{"status":"moved","url":"https://cdn-s04.mega.dev/<redacted>"}' };
+  c.records.splice(i, 0, moved);
+  const key = c.journal.find((e) => e.status === 'sent' && /^run:4:/.test(e.key))?.key;
+  c.journal.push({ time: new Date().toISOString(), key, status: 'sent' }, { time: new Date().toISOString(), key, status: 'moved', http: 307 });
+  const r = result(c, 'M4');
+  assert.equal(r.ok, true, r.detail);
+  // two 2xx payouts of one task are still a double
+  c.records.splice(i, 1, { ...structuredClone(c.records[i + 0]), status: 200 });
+  assert.equal(result(c, 'M4').ok, false);
+});
