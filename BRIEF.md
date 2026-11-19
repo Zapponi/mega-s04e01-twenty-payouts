@@ -86,6 +86,7 @@ Se o manual contradisser este brief, eu paro e pergunto.
 | Novas tentativas (`GET /manual`) e um `POST /review` por tentativa com o revisor melhorado | `hq.mega.dev` | 2026-11-18 ("Aprovo as 4 (Recommended)") (table) |
 | Prática do lote (`POST /practice`, pagamentos de prática) | `hq.mega.dev`, `pay-s04.mega.dev` (chave de prática) | 2026-11-18 ("Aprovo as 4 (Recommended)") (table) |
 | Lote real na tentativa de 03:54:49Z: `POST /run`, pagamentos do lote em `pay-s04` com a chave de prática, `POST /parked` só depois da decisão do dono, agente no Pi com Haiku 5.5 até 3 sessões | `hq.mega.dev`, `pay-s04.mega.dev`, assinatura Claude | 2026-11-19 ("Sim, as 4, agora (Recommended)") (table) |
+| `claim-challenge` (uuid c0000000-0000-4000-8000-0000005e04e2), recibo `ticket`, answer `{}` | MCP `mega-challenge` | 2026-11-19 ("Claim agora, pular rehearse (Recommended)") |
 
 Fora desta tabela, e perguntados na hora: o lote real (`POST /run`) e o `claim-challenge`.
 
