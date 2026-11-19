@@ -190,3 +190,27 @@ test('M1 does not count a 2xx reply that says pending as finished (Sol review #2
   assert.equal(r.ok, false, r.detail);
   assert.match(r.detail, /missing: 4/);
 });
+
+test('M1 does not count a bare 202 acknowledgement as finished (Sol review #22 round 2)', () => {
+  const c = clone();
+  const i = find(c.records, (r, b) => /\/run$/.test(r.url) && b?.answer !== undefined && /TASK_RUN_4/.test(r.reqBody));
+  c.records[i].status = 202;
+  c.records[i].resBody = '{}';
+  const r = result(c, 'M1');
+  assert.equal(r.ok, false, r.detail);
+  assert.match(r.detail, /missing: 4/);
+});
+
+test('M7 needs a check-lane line for a need named only in the pointer (Sol review #22 round 2)', () => {
+  const c = clone();
+  const i = find(c.records, (r, b) => /\/payouts$/.test(r.url) && /TASK_RUN_4/.test(r.reqBody));
+  c.records[i].status = 422;
+  c.records[i].resBody = JSON.stringify({ status: 'refused', message: 'No.', pointer: 'check-lane has a need for this: payout-run.' });
+  c.records.splice(i + 1);
+  c.journal.push({ time: 't', key: 'run:4:x', status: 'refused', need: 'payout-run' });
+  const r = checks({ expectOf: 4, scope: SCOPE, ...c, checkLane: [] }).find((x) => x.id === 'M7');
+  assert.equal(r.ok, false, r.detail);
+  assert.match(r.detail, /need "payout-run" has no line in logs\/check-lane.jsonl/);
+  const ok = checks({ expectOf: 4, scope: SCOPE, ...c, checkLane: [{ need: 'payout-run', time: 't', result: 'read' }] }).find((x) => x.id === 'M7');
+  assert.equal(ok.ok, true, ok.detail);
+});

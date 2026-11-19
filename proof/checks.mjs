@@ -63,7 +63,9 @@ export const accountOnFile = (manualText) => /account on file is (acct_[A-Za-z0-
 export function refusal(r) {
   if (!sentReq(r) || r.status === undefined) return null;
   const b = json(r.resBody);
-  const need = b && typeof b === 'object' ? b.need : undefined;
+  // the need may be named only in the pointer ("check-lane has a need for this: payout-run."; Sol review #22 r2)
+  const fromPointer = typeof b?.pointer === 'string' ? /need for this:\s*([a-z0-9][a-z0-9-]*)/i.exec(b.pointer)?.[1] : undefined;
+  const need = b && typeof b === 'object' ? b.need ?? fromPointer : undefined;
   if (need !== undefined || /^(refused|rejected|denied)$/i.test(String(b?.status ?? '')) || (r.status >= 400 && r.status < 500)) return { need: need === undefined ? undefined : String(need) };
   return null;
 }
@@ -147,7 +149,10 @@ export function checks({ records, journal = [], manualText = '', checkLane = [],
   const of = [...tasks.values()][0]?.of;
   // a 2xx that says it is not finished (pending, queued, already sent) is not a completion (Sol review #22 B3)
   const notDone = (w) => /^(pending|queued|waiting|processing|accepted-pending)$/i.test(String(w.res?.status ?? '')) || w.res?.already === true;
-  const done = (n, kinds) => writes.some((w) => w.n === n && kinds.includes(w.kind) && ok2(w) && !refusal(w) && !notDone(w));
+  // A completion is a 200/201 the course gave as an answer, never a bare acknowledgement (202 {}; Sol review #22 r2): a
+  // /run answer counts only when its reply is the next task, or, after the last task, a final status.
+  const finished = (w) => [200, 201].includes(w.status) && !refusal(w) && !notDone(w) && (w.kind !== 'answer' || (w.res?.status === 'task' && w.res.n > w.n) || (w.n === of && typeof w.res?.status === 'string' && w.res.status !== 'task'));
+  const done = (n, kinds) => writes.some((w) => w.n === n && kinds.includes(w.kind) && finished(w));
   const flagged = [...new Set(writes.filter((w) => w.kind === 'flag' && ok2(w)).map((w) => w.n))];
 
   // M1: every task answered (by /run, or finished by /parked), none missing, as the course replied.
