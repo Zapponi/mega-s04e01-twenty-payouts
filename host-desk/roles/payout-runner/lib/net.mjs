@@ -283,8 +283,10 @@ export async function send({ method = 'GET', url, headers = {}, body, caller = '
     // every hop: a redirect never carries a secret past its scope either
     const why = refusal({ method, url: target, caller }, cfg) ?? scopeRefusal(target, `${target}\n${JSON.stringify(h)}\n${payload ?? ''}`, vars, cfg);
     if (why) {
-      log(cfg, { ...base, hop, url: mask(target, vars), refused: why });
-      return { ok: false, refused: why, url: mask(target, vars), body: '' };
+      // the reason names the host and may hold a secret placed there by a redirect (Sol whole-diff B #3)
+      const shown = mask(why, vars);
+      log(cfg, { ...base, hop, url: mask(target, vars), refused: shown });
+      return { ok: false, refused: shown, url: mask(target, vars), body: '' };
     }
     let res;
     try {

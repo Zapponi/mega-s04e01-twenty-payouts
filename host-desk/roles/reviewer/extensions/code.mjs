@@ -8,6 +8,8 @@ import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadVars } from './vars.mjs';
 
+const mask = (text, vars) => Object.entries(vars).reduce((s, [k, v]) => (v && v.length >= 4 ? s.split(v).join(`{{${k}}}`).split(encodeURIComponent(v)).join(`{{${k}}}`) : s), String(text));
+
 const SCRIPTS = join(dirname(dirname(fileURLToPath(import.meta.url))), 'scripts');
 // The Node that runs a script: never process.execPath alone. In a compiled Pi (Pi 1.5.2 from nix is one binary)
 // process.execPath is the pi binary itself, and "pi <file> <args>" starts a whole new agent session with every
@@ -15,7 +17,14 @@ const SCRIPTS = join(dirname(dirname(fileURLToPath(import.meta.url))), 'scripts'
 // run.mjs (plain Node) passes its own path as HOST_NODE; anything not named node is refused.
 export function nodeBin(env = process.env, execPath = process.execPath) {
   const c = env.HOST_NODE || execPath;
-  return typeof c === 'string' && nodePath.isAbsolute(c) && /^node(\.exe)?$/i.test(nodePath.basename(c)) ? c : null;
+  const isNode = (f) => /^node(\.exe)?$/i.test(nodePath.basename(f));
+  if (typeof c !== 'string' || !nodePath.isAbsolute(c) || !isNode(c)) return null;
+  // the file a link named node points to must be named node too (a link to pi is refused; Sol whole-diff B #2)
+  try {
+    return isNode(realpathSync(c)) ? c : null;
+  } catch {
+    return null;
+  }
 }
 
 const TIMEOUT_MS = 120_000;
@@ -85,8 +94,13 @@ export default function (pi) {
         let text = '';
         child.stdout.on('data', (d) => (text += d));
         child.stderr.on('data', (d) => (text += d));
-        child.on('error', (e) => done(`could not run: ${e.message}`));
-        child.on('close', (code) => done(`exit ${code}\n${text.length > MAX_OUT ? `${text.slice(0, MAX_OUT)}\n…(cut)` : text}`));
+        // masked before the model sees it: a script that prints a secret by mistake shows {{NAME}} (Sol whole-diff B #2)
+        const vars = loadVars();
+        child.on('error', (e) => done(`could not run: ${mask(e.message, vars)}`));
+        child.on('close', (code) => {
+          const shown = mask(text, vars);
+          done(`exit ${code}\n${shown.length > MAX_OUT ? `${shown.slice(0, MAX_OUT)}\n…(cut)` : shown}`);
+        });
       });
       return { content: [{ type: 'text', text: out }], details: {} };
     },

@@ -142,7 +142,8 @@ export async function guardedRequest(p, signal) {
     });
     extra += `\n\nHouse check (code, not the patch's words)${now?.settings?.body ? '' : ' — read GET /settings first: no fixed verdict without it'}:\n${lines.join('\n')}`;
   }
-  return { content: [{ type: 'text', text: `${res.status} ${mask(p.url, vars)}\n${out}${extra}` }], details: { status: res.status } };
+  // the House check prints hunk ids from the patch: masked like the body (Sol whole-diff B #1)
+  return { content: [{ type: 'text', text: mask(`${res.status} ${p.url}\n${out}${extra}`, vars) }], details: { status: res.status } };
 }
 
 export default function (pi) {

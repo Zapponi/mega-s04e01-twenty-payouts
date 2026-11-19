@@ -26,7 +26,14 @@ const SCRIPTS = join(dirname(dirname(fileURLToPath(import.meta.url))), 'scripts'
 // run.mjs (plain Node) passes its own path as HOST_NODE; anything not named node is refused.
 export function nodeBin(env = process.env, execPath = process.execPath) {
   const c = env.HOST_NODE || execPath;
-  return typeof c === 'string' && nodePath.isAbsolute(c) && /^node(\.exe)?$/i.test(nodePath.basename(c)) ? c : null;
+  const isNode = (f) => /^node(\.exe)?$/i.test(nodePath.basename(f));
+  if (typeof c !== 'string' || !nodePath.isAbsolute(c) || !isNode(c)) return null;
+  // the file a link named node points to must be named node too (a link to pi is refused; Sol whole-diff B #2)
+  try {
+    return isNode(realpathSync(c)) ? c : null;
+  } catch {
+    return null;
+  }
 }
 
 const TIMEOUT_MS = 120_000;
@@ -98,7 +105,8 @@ export default function (pi) {
       const out = await new Promise((done) => {
         const child = spawn(node, [file, ...(p.args ?? [])], {
           cwd: SCRIPTS,
-          env: { ...basics(), ...net(), ...loadVars() },
+          // another role's attempt (ATTEMPT_PREV_*) never reaches a script (Sol whole-diff B #2)
+          env: { ...basics(), ...net(), ...Object.fromEntries(Object.entries(loadVars()).filter(([k]) => !k.startsWith('ATTEMPT_PREV_'))) },
           stdio: ['ignore', 'pipe', 'pipe'],
           signal,
           timeout: TIMEOUT_MS,

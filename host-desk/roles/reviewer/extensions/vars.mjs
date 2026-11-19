@@ -9,11 +9,13 @@ import { fileURLToPath } from 'node:url';
 // host-desk/roles/<role>/extensions/vars.mjs → host-desk/
 const DESK = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 
+/** The file loadVars reads. Lab mode (run.mjs with LAB_URL) reads the lab's fake vars; outside it, vars.json. */
+export const varsFile = () => (process.env.LAB_URL && process.env.VARS_FILE ? process.env.VARS_FILE : join(DESK, 'vars.json'));
+
 /** name → value, from vars.json. Missing file or bad JSON → no vars. */
 export function loadVars() {
   try {
-    // Lab mode (run.mjs with LAB_URL) reads the lab's fake vars; outside it run.mjs deletes VARS_FILE, so this is vars.json.
-    const file = process.env.LAB_URL && process.env.VARS_FILE ? process.env.VARS_FILE : join(DESK, 'vars.json');
+    const file = varsFile();
     const raw = JSON.parse(readFileSync(file, 'utf8'));
     return Object.fromEntries(Object.entries(raw).filter(([k, v]) => /^[A-Z][A-Z0-9_]*$/.test(k) && typeof v === 'string'));
   } catch {

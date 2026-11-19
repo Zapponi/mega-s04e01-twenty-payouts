@@ -162,10 +162,11 @@ test('without LAB_URL the role reads only the real files and the course URL', as
   process.env.VARS_FILE = join(ROOT, 'lab/reviewer/vars.lab.json');
   process.env.HOSTS_FILE = '/nonexistent/hosts.json';
   try {
-    const { loadVars } = await import('../extensions/vars.mjs');
+    const { varsFile } = await import('../extensions/vars.mjs');
     const { loadHosts } = await import('../extensions/hosts.mjs');
     const { courseBase } = await import('../extensions/http.mjs');
-    assert.notEqual(loadVars().ATTEMPT, LAB_VARS.ATTEMPT);
+    // the path only: the test never opens the real store (Sol whole-diff B #5)
+    assert.equal(varsFile(), join(ROOT, 'host-desk/vars.json'));
     assert.deepEqual(loadHosts(), { ATTEMPT: ['hq.mega.dev'] });
     assert.equal(courseBase(), 'https://hq.mega.dev/challenges/looks-good-to-me');
     const real = readFileSync(join(ROOT, 'host-desk/roles/reviewer/hosts.json'), 'utf8');
