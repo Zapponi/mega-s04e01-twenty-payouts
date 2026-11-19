@@ -214,3 +214,14 @@ test('M7 needs a check-lane line for a need named only in the pointer (Sol revie
   const ok = checks({ expectOf: 4, scope: SCOPE, ...c, checkLane: [{ need: 'payout-run', time: 't', result: 'read' }] }).find((x) => x.id === 'M7');
   assert.equal(ok.ok, true, ok.detail);
 });
+
+test('M1 counts the last answer when the end reply has only a message, and still not a bare 200 {} (Sol review #22 round 3)', () => {
+  const c = clone();
+  const i = find(c.records, (r, b) => /\/run$/.test(r.url) && b?.answer !== undefined && /TASK_RUN_4/.test(r.reqBody));
+  c.records[i].status = 200;
+  c.records[i].resBody = JSON.stringify({ message: 'All 4 tasks are answered.' });
+  const r = result(c, 'M1');
+  assert.equal(r.ok, true, r.detail);
+  c.records[i].resBody = '{}';
+  assert.equal(result(c, 'M1').ok, false, 'an empty 200 is not an end reply');
+});

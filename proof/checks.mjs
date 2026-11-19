@@ -150,8 +150,9 @@ export function checks({ records, journal = [], manualText = '', checkLane = [],
   // a 2xx that says it is not finished (pending, queued, already sent) is not a completion (Sol review #22 B3)
   const notDone = (w) => /^(pending|queued|waiting|processing|accepted-pending)$/i.test(String(w.res?.status ?? '')) || w.res?.already === true;
   // A completion is a 200/201 the course gave as an answer, never a bare acknowledgement (202 {}; Sol review #22 r2): a
-  // /run answer counts only when its reply is the next task, or, after the last task, a final status.
-  const finished = (w) => [200, 201].includes(w.status) && !refusal(w) && !notDone(w) && (w.kind !== 'answer' || (w.res?.status === 'task' && w.res.n > w.n) || (w.n === of && typeof w.res?.status === 'string' && w.res.status !== 'task'));
+  // /run answer counts only when its reply is the next task, or, after the last task, a final status or a message (the
+  // S04E01 end reply said "All 20 tasks are answered."; its status field was not kept, Sol review #22 r3).
+  const finished = (w) => [200, 201].includes(w.status) && !refusal(w) && !notDone(w) && (w.kind !== 'answer' || (w.res?.status === 'task' && w.res.n > w.n) || (w.n === of && w.res?.status !== 'task' && ((typeof w.res?.status === 'string' && w.res.status !== '') || (typeof w.res?.message === 'string' && w.res.message.trim() !== ''))));
   const done = (n, kinds) => writes.some((w) => w.n === n && kinds.includes(w.kind) && finished(w));
   const flagged = [...new Set(writes.filter((w) => w.kind === 'flag' && ok2(w)).map((w) => w.n))];
 
