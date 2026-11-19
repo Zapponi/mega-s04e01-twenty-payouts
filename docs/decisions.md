@@ -51,3 +51,8 @@ A changed decision gets a new line that names the one it replaces. Findings (wha
 - 2026-11-17 who: human — "Se o curso aceitou, nao tem flag / 2 - autorizo": M2 (23 ms no nosso relógio) aceito com a evidência da API; claim-challenge autorizado.
 - 2026-11-18 who: human — "Sim, manual + revisor como veio": S04E02 no mesmo repo (branch s04e02-reviewer, "Mesmo repo, branch nova"); buscar o manual e rodar o revisor do curso como veio, uma vez, Haiku 5.5, < US$ 0,10.
 - 2026-11-18 who: human — "Claude Pro/Max (Recommended)": os papéis rodam no Pi com a assinatura Claude (ANTHROPIC_OAUTH_TOKEN, token em ~/.pi/agent/, fora do repo), não com o OpenRouter.
+- 2026-11-18 who: agent (kickoff S04E02) — docs do S04E01 (BRIEF, BRIEF didático, plan) movidos para docs/challenges/s04e01/; BRIEF.md novo do S04E02; AGENTS.md passa a descrever o Host Desk.
+- 2026-11-18 who: agent (KEEP.md, check-lane payout-run do S04E01) — o lote do S04E02 não faz a checagem da chave em verify-s04, mesmo com o manual pedindo.
+- 2026-11-18 who: agent (manual S04E02 + why/payout-rounding.md) — valor do lote = Math.floor(total × (1 − commissionPct/100)), com commissionPct de GET /settings na mesma tentativa.
+- 2026-11-18 who: agent (h-9a8 recusado; /settings 2026-11-17.481 ≠ ROLE.md 2026-11-10.1) — o revisor melhorado lê /settings e as notas why/ a cada rodada; nenhum valor da casa fica fixo no ROLE.md.
+- 2026-11-18 who: agent (BRIEF fatia 1) — o revisor ganha um dublê no lab/ com dois patches (o real da tentativa 1 e um de armadilhas) antes de gastar uma tentativa real.

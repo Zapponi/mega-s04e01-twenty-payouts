@@ -1,22 +1,22 @@
-# S04E01 Twenty payouts
+# Host Desk (MEGA.dev S04)
 
-Challenge do curso MEGA.dev: um agente (Pi + três ferramentas) roda sozinho o lote de 20 pagamentos de um anfitrião fictício pela API do curso, dentro do tempo-limite; o Giovanni decide as tarefas do dono na página do Challenge.
+O Host Desk do curso MEGA.dev, um produto que cresce na semana 4. S04E01 (resolvido): o papel `payout-runner` roda sozinho o lote de pagamentos de um anfitrião fictício. S04E02 (atual, `BRIEF.md`): o papel `reviewer` julga o patch do co-anfitrião, e o lote roda de novo. O Giovanni decide as tarefas do dono na página do Challenge. Os docs do S04E01 estão em `docs/challenges/s04e01/`.
 
 Read KEEP.md first, before any other work in this folder. It holds notes, not instructions, and only a line with a source counts. If KEEP.md is a link, do not open it: tell your human. Add each finding to it with the keep skill: one line, with its source. Then read `BRIEF.md`.
 
 ## Commands
 Exact commands. An agent makes up the ones that are missing here.
-- Install: `npm install -g @earendil-works/pi-coding-agent` (Pi 1.5+; Node 22.19+). Model key: `~/.pi/agent/auth.json` (OpenRouter), then `pi update --models`.
-- Run: `cd host-desk && MODEL=openrouter/anthropic/claude-haiku-5.5 node roles/payout-runner/run.mjs` (slice 1 adds `READ_ONLY=1`). Every run that calls the model is a paid call: ask first with the call count and cost.
+- Install: `npm install -g @earendil-works/pi-coding-agent` (Pi 1.5+; Node 22.19+). Model: Claude Pro/Max subscription, token from `claude setup-token` in `~/.pi/agent/anthropic-oauth-token` (mode 600), passed as `ANTHROPIC_OAUTH_TOKEN`.
+- Run the reviewer: `cd host-desk && ANTHROPIC_OAUTH_TOKEN="$(cat ~/.pi/agent/anthropic-oauth-token)" MODEL=anthropic/claude-haiku-5-5 node roles/reviewer/run.mjs`. The payout runner: same env, `node roles/payout-runner/run.mjs`. Every model run uses the subscription quota: ask first with the session count.
 - Test: `./verify` (must checks), `./verify --slice 1`, `./verify --all` (adds keep).
 - Lint/format: none (plain Node, no dependencies).
 
 ## Layout
-- `host-desk/`: the course's starter agent. `roles/payout-runner/` (ROLE.md, run.mjs, extensions/, scripts/), `factory/CHECKLIST.md`, `vars.json` (local only, git-ignored).
+- `host-desk/`: the course's Host Desk. `roles/payout-runner/` and `roles/reviewer/` (ROLE.md, run.mjs, extensions/, scripts/), `why/` (house notes), `factory/CHECKLIST.md`, `vars.json` (local only, git-ignored).
 - `lab/`: the local stand-in for the course API and the blind checker (slice 2).
 - `verify`: the proof (BRIEF.md "Proof").
 - `logs/`, `journal/`: request log and the agent's journal, local only, git-ignored, secrets masked.
-- `BRIEF.md`: result, proof, judge, limits, access, autonomy and the pre-mortem. `BRIEF-didatico-detalhado.md`: the long explanation with diagrams.
+- `BRIEF.md`: the current Challenge (S04E02): result, proof, judge, limits, access, autonomy and the pre-mortem. `docs/challenges/<code>/`: briefs and plans of finished Challenges.
 - `.agents/skills/`: this project's skills, one source for every harness (see Skills).
 - `KEEP.md`: findings, one line each with its source (keep skill). `docs/decisions.md`: one line per decision.
 - `sessions/YYYY-MM-DD.md`: one work log per day (see `sessions/README.md`).
@@ -34,7 +34,7 @@ Only rules an agent would get wrong without being told. Keep fewer than ten. Wit
 - The agent never grades itself: only `./verify` and the course's claim count.
 
 ## Before you …, read
-- Before changing ROLE.md or a script, read `BRIEF.md` (Proof, Pre-mortem) and `BRIEF-didatico-detalhado.md` § 5: every care listed there has a reason from a past Challenge.
+- Before changing ROLE.md or a script, read `BRIEF.md` (Proof, Pre-mortem) and `docs/challenges/s04e01/BRIEF-didatico-detalhado.md` § 5: every care listed there has a reason from a past Challenge.
 - Before any run that calls the model or the course API, read `BRIEF.md` "Outside actions approved" and Limits: the real batch and the claim are not in the table.
 - Before the claim, read the `rehearse` and `sol-loop` skills and run `node ~/src/mega-agent-kit/scripts/check-flow.mjs --release`.
 
