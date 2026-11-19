@@ -156,6 +156,8 @@ export function labChecks({ truth, scenario, journal = [], texts = [], secrets =
   if (!ref) m7.push('no refusal happened');
   else {
     if (!journal.some((e) => e.need === ref.need)) m7.push(`need ${ref.need} is not in the journal`);
+    // the pointer is kept with it, so the harness can call check-lane with it (S2; Sol review #22 B4)
+    if (!journal.some((e) => e.need === ref.need && typeof e.pointer === 'string' && e.pointer.includes(ref.need))) m7.push('the refusal\'s pointer is not in the journal');
     const after = truth.filter((e) => e.n === 20 && ms(e) > ms(ref) && ['payout', 'answer', 'flag', 'parked_finish'].includes(e.ev));
     if (after.length) m7.push(`sent on 20 after the refusal: ${after.map((e) => e.ev).join(', ')}`);
   }

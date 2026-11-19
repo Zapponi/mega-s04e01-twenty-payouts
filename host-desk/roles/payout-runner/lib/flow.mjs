@@ -81,7 +81,10 @@ export function refusalOf(r) {
   try {
     b = JSON.parse(r.body);
   } catch {}
-  const need = b && typeof b === 'object' ? b.need : undefined;
+  // a refusal may name its need only in a pointer: "check-lane has a need for this: routine-script." (S04E01 real
+  // run, KEEP.md); the need is taken from there, so the journal and the harness still see it (Sol review #22 B4)
+  const fromPointer = typeof b?.pointer === 'string' ? /need for this:\s*([a-z0-9][a-z0-9-]*)/i.exec(b.pointer)?.[1] : undefined;
+  const need = b && typeof b === 'object' ? b.need ?? fromPointer : undefined;
   const st = b && typeof b === 'object' ? String(b.status ?? '') : '';
   // 408, 425 and 429 say "not now", not "no": they are not a refusal (the answer may be retried).
   const retryable = [408, 425, 429].includes(r.status);

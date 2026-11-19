@@ -81,7 +81,7 @@ async function currentSettings() {
   if (settingsNow) return settingsNow;
   const before = settingsOf(st);
   if (!before) return (settingsNow = { ok: false, why: 'no /settings read for this attempt is in the journal' });
-  const now = await readSettings(st, TIMEOUT_MS);
+  const now = await readSettings(st, TIMEOUT_MS, 'settings_check');
   if (!now.ok) return (settingsNow = now);
   if (now.version !== before.version || now.commissionPct !== before.commissionPct) {
     journal({ event: 'settings_changed', attempt: st.ATTEMPT_SEEN_AT, before: before.version, now: now.version, beforePct: before.commissionPct, nowPct: now.commissionPct });

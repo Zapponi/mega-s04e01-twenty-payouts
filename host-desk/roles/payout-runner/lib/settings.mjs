@@ -6,16 +6,23 @@ import { events, journal } from './batch.mjs';
 import { refusalOf, settingsUrl, show } from './flow.mjs';
 import { send } from './net.mjs';
 
-/** The settings read for this attempt (the last one), or null. */
-export function settingsOf(st) {
-  return events().filter((e) => e.event === 'settings' && e.attempt === st.ATTEMPT_SEEN_AT).at(-1) ?? null;
+/**
+ * The settings a batch of this attempt was opened with: the last read journaled as 'settings' before that batch's
+ * open ('opening'), or, before any open, the last one. A later check (parked.mjs) is journaled as 'settings_check'
+ * and never becomes the baseline, so a changed version stops every later owner payout too (Sol review #22 B1).
+ */
+export function settingsOf(st, batch = 'run') {
+  const ev = events().filter((e) => e.attempt === st.ATTEMPT_SEEN_AT);
+  const opening = ev.findLast((e) => e.event === 'opening' && e.batch === batch);
+  const reads = ev.filter((e) => e.event === 'settings' && (!opening || Date.parse(e.time) <= Date.parse(opening.time)));
+  return reads.at(-1) ?? null;
 }
 
 /**
  * GET /settings for this attempt. { ok: true, version, commissionPct } (journaled), or { ok: false, why, need? }.
  * A reply without a string version and a commissionPct in [0, 100) is not used.
  */
-export async function readSettings(st, timeoutMs = Number(process.env.SETTLE_TIMEOUT_MS || 4000)) {
+export async function readSettings(st, timeoutMs = Number(process.env.SETTLE_TIMEOUT_MS || 4000), event = 'settings') {
   const r = await send({ method: 'GET', url: settingsUrl(), headers: { Authorization: 'Bearer {{ATTEMPT}}' }, signal: AbortSignal.timeout(timeoutMs) });
   const ref = r.status ? refusalOf(r) : null;
   if (ref) {
@@ -31,6 +38,6 @@ export async function readSettings(st, timeoutMs = Number(process.env.SETTLE_TIM
     journal({ event: 'settings_failed', attempt: st.ATTEMPT_SEEN_AT, http: r.status, why: r.refused ?? r.error });
     return { ok: false, why: `GET /settings gave no usable { version, commissionPct }: ${show(r).slice(0, 200)}` };
   }
-  journal({ event: 'settings', attempt: st.ATTEMPT_SEEN_AT, version: b.version, commissionPct: pct, http: r.status });
+  journal({ event, attempt: st.ATTEMPT_SEEN_AT, version: b.version, commissionPct: pct, http: r.status });
   return { ok: true, version: b.version, commissionPct: pct };
 }

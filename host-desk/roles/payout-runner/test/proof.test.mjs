@@ -169,3 +169,24 @@ test('M7 fails on a refusal with a need that is not in the journal or not sent t
   assert.match(result(c, 'M7').detail, /no line in logs\/check-lane.jsonl/);
   assert.equal(result({ ...c, checkLane: [{ need: 'owner-check' }] }, 'M7').ok, true);
 });
+
+test('M6 uses only a /settings read made with the same attempt as the open (Sol review #22 B2)', () => {
+  const c = clone();
+  const s = c.records.find((r) => r.method === 'GET' && /\/settings$/.test(r.url));
+  assert.ok(s, 'the clean run read /settings');
+  // the read carried another attempt (the reviewer's, kept as ATTEMPT_PREV_0) and said 50 %
+  for (const k of Object.keys(s.reqHeaders)) if (k.toLowerCase() === 'authorization') s.reqHeaders[k] = 'Bearer {{ATTEMPT_PREV_0}}';
+  const r = result(c, 'M6');
+  assert.equal(r.ok, false, r.detail);
+  assert.match(r.detail, /no 2xx GET \/settings before the run opened/);
+});
+
+test('M1 does not count a 2xx reply that says pending as finished (Sol review #22 B3)', () => {
+  const c = clone();
+  const i = find(c.records, (r, b) => /\/run$/.test(r.url) && b?.answer !== undefined && /TASK_RUN_4/.test(r.reqBody));
+  assert.ok(i >= 0);
+  c.records[i].resBody = JSON.stringify({ status: 'pending', message: 'Still checking.' });
+  const r = result(c, 'M1');
+  assert.equal(r.ok, false, r.detail);
+  assert.match(r.detail, /missing: 4/);
+});

@@ -915,3 +915,25 @@ test('S04E02: the deadline comes from the first task\'s runLimitMs, not from 600
   assert.equal(pays().length, 6);
   assert.match(r.out, /answered \[1,2,3,4,5,6\]/);
 });
+
+test('S04E02 /parked: after a settings change stopped one owner task, a later call still stops the next (Sol review #22 B1)', async () => {
+  fake.reset({ runTasks: 3, over: { 2: { payout: { account: 'acct_other0002' } }, 3: { payout: { account: 'acct_other0003' } } }, settings: [{ version: 'v1', commissionPct: 20 }, { version: 'v2', commissionPct: 25 }] });
+  assert.match((await fetchManual()).out, /^200 /);
+  assert.equal((await run('routine.mjs', 'run')).code, 0);
+  fake.parked.set(2, 'on-file');
+  const first = await run('parked.mjs');
+  assert.match(first.out, /STOPPED task 2: \/settings changed from v1/);
+  fake.parked.set(3, 'on-file');
+  const second = await run('parked.mjs');
+  assert.match(second.out, /STOPPED task 3: \/settings changed from v1 \(20 %\) to v2 \(25 %\)/, second.out);
+  assert.equal(pays().filter((h) => [token('run', 2), token('run', 3)].includes(h.body.task)).length, 0);
+});
+
+test('a refusal that names its need only in a pointer is journaled with that need (Sol review #22 B4)', async () => {
+  fake.reset({ runTasks: 3, payoutStatus: { 2: { code: 422, body: { status: 'refused', message: 'No.', pointer: 'check-lane has a need for this: payout-account.' } } } });
+  assert.match((await fetchManual()).out, /^200 /);
+  const r = await run('routine.mjs', 'run');
+  assert.equal(r.code, 5, r.out);
+  assert.match(r.out, /need: payout-account/);
+  assert.ok(journal().some((e) => e.status === 'refused' && e.need === 'payout-account'));
+});

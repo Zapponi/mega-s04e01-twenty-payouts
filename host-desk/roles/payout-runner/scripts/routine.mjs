@@ -124,7 +124,7 @@ if (opened) {
   out(`OPENED ${batch}: ${task?.of ?? '?'} tasks, runLimitMs ${task?.runLimitMs ?? '?'}, timeLeftMs ${task?.timeLeftMs ?? '?'}.`);
 }
 // The commission of this attempt, read before the open (above, or by the session that opened it).
-const settings = settingsOf(st);
+const settings = settingsOf(st, batch);
 if (!settings) stop(`no /settings read for this attempt is in the journal; no payout without the commission. Tell the human.`);
 
 /**

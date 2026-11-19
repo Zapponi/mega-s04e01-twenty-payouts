@@ -110,7 +110,7 @@ if (action !== 'pay') {
   console.log('Second argument: pay, flag "<reason>" or answer.');
   process.exit(2);
 }
-const settings = settingsOf(st);
+const settings = settingsOf(st, batch);
 const a = settings ? amountOf(task.booking, settings.commissionPct) : { ok: false, why: 'no /settings read for this attempt is in the journal (start.mjs reads it)' };
 if (!a.ok) {
   console.log(`NOT PAID, task ${task.n}: ${a.why}. Nothing was sent. Decide: flag it for the owner (run) or stop and tell the human.`);

@@ -40,14 +40,19 @@ export function expectedAmount(b, pct) {
   return Math.floor(((nights * b.nightlyRate + b.cleaningFee) * (100 - pct)) / 100);
 }
 
-/** The commission of the last 2xx GET /settings before the run opened (same attempt), or null. */
+/**
+ * The commission of the last 2xx GET /settings before the run opened, read with the same attempt as the open (the
+ * masked name in its Bearer header equals the one in the open's body), or null (Sol review #22 B2).
+ */
 export function settingsBeforeRun(records) {
   let open = -1;
   records.forEach((r, i) => {
     if (r.method === 'POST' && isRun(r) && ok2(r) && json(r.reqBody)?.attempt !== undefined) open = i;
   });
   if (open < 0) return null;
-  const s = records.slice(0, open).filter((r) => r.method === 'GET' && path(r.url).endsWith('/settings') && ok2(r) && sentReq(r)).at(-1);
+  const att = String(json(records[open].reqBody)?.attempt ?? '');
+  const bearer = (r) => Object.entries(r.reqHeaders ?? {}).find(([k]) => k.toLowerCase() === 'authorization')?.[1];
+  const s = records.slice(0, open).filter((r) => r.method === 'GET' && path(r.url).endsWith('/settings') && ok2(r) && sentReq(r) && /^\{\{[A-Z0-9_]+\}\}$/.test(att) && bearer(r) === `Bearer ${att}`).at(-1);
   const b = json(s?.resBody);
   return b && typeof b.commissionPct === 'number' ? { version: b.version, commissionPct: b.commissionPct, time: s.time } : null;
 }
@@ -140,7 +145,9 @@ export function checks({ records, journal = [], manualText = '', checkLane = [],
   }
   const { tasks, writes, decisions, recs } = m;
   const of = [...tasks.values()][0]?.of;
-  const done = (n, kinds) => writes.some((w) => w.n === n && kinds.includes(w.kind) && ok2(w) && !refusal(w));
+  // a 2xx that says it is not finished (pending, queued, already sent) is not a completion (Sol review #22 B3)
+  const notDone = (w) => /^(pending|queued|waiting|processing|accepted-pending)$/i.test(String(w.res?.status ?? '')) || w.res?.already === true;
+  const done = (n, kinds) => writes.some((w) => w.n === n && kinds.includes(w.kind) && ok2(w) && !refusal(w) && !notDone(w));
   const flagged = [...new Set(writes.filter((w) => w.kind === 'flag' && ok2(w)).map((w) => w.n))];
 
   // M1: every task answered (by /run, or finished by /parked), none missing, as the course replied.
