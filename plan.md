@@ -21,6 +21,8 @@ Source of truth: the official statement (start-challenge reply of 2026-11-18 + l
 
 ## Slice 1 — the improved reviewer reaches the course (R1, R2, R3, S1, S2 for the reviewer)
 
+The lab cases are listed in `lab/CASES.md` (R01–R28 for the reviewer, B01–B24 for the batch), in four groups: direct use, avoid an error, handle an error, exploit. Each case has its expected result, written before any run, and the check that reads it.
+
 ### § 1 Read a fresh attempt, then the verifier and the lab
 
 - Open one new attempt only to read it (approved row 3; reads of an attempt are the agent's): save `/settings` and `/patch`, masked, as a third fixture. Do not send a review on it. This tests the guess that patch and settings change per attempt.
@@ -36,7 +38,7 @@ Source of truth: the official statement (start-challenge reply of 2026-11-18 + l
 - A dry agent (no model) for free runs: one right review and one with a wrong verdict.
 - The lab never touches the real files: `LAB_URL` mode sets `VARS_FILE` (`lab/vars.lab.json`, synthetic values) and `HOSTS_FILE` (mock host only); outside lab mode both are deleted, as in the payout runner.
 
-Done when: `./verify --lab-reviewer` passes on the right dry run and fails on the wrong one, and the expected maps carry the checker's sign-off in `docs/reviews/`.
+Done when: the mock and fixtures cover R01–R28 of `lab/CASES.md`; `./verify --lab-reviewer` passes on the right dry run and fails on the wrong one (for each check R1, R2, S1 at least one failing control); the expected maps carry the checker's sign-off in `docs/reviews/`.
 
 ### § 2 Improve the reviewer
 
@@ -50,7 +52,7 @@ Done when: `./verify --lab-reviewer` passes on the right dry run and fails on th
 - Tests: the guard (extra method, second POST, missing hunk, redirect on POST), lab mode never active without `LAB_URL`, and the real `hosts.json` unchanged.
 - Lab: two model runs in a row on all three fixtures (6 sessions, subscription quota; row 2; I say the count before).
 
-Done when: unit tests pass and `./verify --lab-reviewer` passes on two model runs in a row for all three fixtures.
+Done when: unit tests pass and `./verify --lab-reviewer` passes R01–R28 on two model runs in a row.
 
 ### § 3 Real review
 
@@ -74,7 +76,7 @@ Done when: `./verify --slice 1` passes on the real reply.
 - A batch refusal with a pointer: the routine stops that task, the harness calls `check-lane`, `./verify` S2 checks it.
 - Lab: commission other than 15 and 18; owner `amount` override, zero, decline, late and repeated decisions; a different time budget with a late first reply; the S04E01 traps.
 
-Done when: unit tests and `./verify --lab` pass on a dry run and on two model runs in a row.
+Done when: unit tests and `./verify --lab` pass B01–B24 of `lab/CASES.md` on a dry run and on two model runs in a row.
 
 ### § 5 Practice and real batch
 

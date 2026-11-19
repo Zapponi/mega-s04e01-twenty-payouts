@@ -61,3 +61,4 @@ A changed decision gets a new line that names the one it replaces. Findings (wha
 - 2026-11-18 who: human — "Nenhum veto (Recommended)": as decisões de agente do kickoff S04E02 ficam.
 - 2026-11-18 who: agent (regra do S04E01 citava "slice 3") — AGENTS.md: uma escrita na API do curso exige a linha datada em BRIEF "Outside actions approved".
 - 2026-11-18 who: human — "Só o revisor (Recommended)": baixar só o zip do revisor (reviewer-325c6f1b.zip) e colocá-lo no Host Desk do S04E01.
+- 2026-11-18 who: human — "eu quero que voce pense em testar os casos de uso diretos, como evita erro, como lida com erros/problemas, e casos de exploit. Quero ter pelo menos 25 casos": catálogo lab/CASES.md (28 do revisor, 24 do lote), ligado aos Done when do plan.md.
