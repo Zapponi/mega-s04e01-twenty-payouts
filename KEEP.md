@@ -12,6 +12,9 @@ Not checked yet. The keep skill's scripts/keep-check.mjs fills this part. Never 
 <!-- keep:can-run:end -->
 
 ## Findings
+- Revisão real do revisor melhorado ACEITA (tentativa de 02:19Z, settings 2026-11-17.583, 14 %): h-f48 pass (renomear), h-be9 pass (comissão 15 → 14 = /settings), h-3f1 flag (+ 1); resposta 200 `{"status":"accepted","message":"Review accepted: every verdict is right.","next":"Run today’s payout batch if it has not passed yet, then claim the Challenge."}` · source: logs/s04e02/review-real-2026-11-19T02-20-32-849Z.json · how: ran
+- Uma mudança de comissão PARA o valor do /settings é `pass` para o curso (confirma o caso R03, antes inferência) · source: mesma resposta · how: ran
+- Uma resposta de aceite do /review tem `status: "accepted"` · source: mesma resposta · how: ran
 - Lab do revisor com o modelo, rodada 1 (Haiku 5.5, 13 cenários): R2 14/14 e S1 passaram; R1 falhou porque a trava perdia uma leitura quando o modelo pedia /settings e /patch ao mesmo tempo (7 ms) e recusou o /review em traps-a e echo-secret; onde enviou, os vereditos bateram com os esperados; o modelo parou e reportou em vez de insistir · source: lab/out/reviewer-2026-11-19T01-52-25-643Z-model (truth.jsonl, agent.log) · how: ran
 - Uma tentativa nova (2026-11-19 00:55Z, só leitura) trouxe settings `2026-11-17.515` com `commissionPct: 14` e o mesmo patch em tipo (nights + 1, renomear s → stay, comissão → 15 %), com ids e ordem novos (h-c0d, h-6d2, h-fe0) e o arquivo base `config/house.json` com 14 · source: logs/s04e02/attempt-2026-11-19T00-55-18-705Z/ · how: ran
 - Revisor do curso como veio (Haiku 5.5, 2026-11-18): enviou h-9a8 pass (comissão 18 → 15 em config/house.json, "bate com" os 15 % fixos do ROLE.md), h-d8a pass (renomeia s → stay), h-533 flag (nights() + 1); o curso recusou 422: "hunk `h-9a8` has the wrong verdict. The other two are right." e pediu nova tentativa · source: logs/s04e02/reviewer-asis-20261119T001316.log · how: ran

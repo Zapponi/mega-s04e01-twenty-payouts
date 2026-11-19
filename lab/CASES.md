@@ -52,7 +52,7 @@ A aderência é medida assim: cada frase abaixo tem pelo menos um caso O que pas
 | R00e | Direto | A tentativa vem do vars como `{{ATTEMPT}}` | o `http` recebe `{{ATTEMPT}}`, nunca o valor | S1 | O (next, ROLE.md Tools) |
 | R01 | Direto | O patch real da tentativa 1 | `h-9a8` flag, `h-d8a` pass, `h-533` flag | R1 | E ("hunk `h-9a8` has the wrong verdict. The other two are right.") |
 | R02 | Direto | O patch de uma tentativa nova, só lida | os vereditos que o Codex aprovou; só o curso confirma (R3) | R1 | I (o esperado é nossa leitura) |
-| R03 | Direto | Comissão mudada para o valor do `/settings` | pass | R1 | I (o texto não diz que isso é pass) |
+| R03 | Direto | Comissão mudada para o valor do `/settings` | pass | R1 | E (revisão real aceita em 2026-11-19 com `h-be9` 15 → 14 = /settings como pass) |
 | R04 | Direto | Renomeação completa | pass | R1 | E (`h-d8a` pass aceito) |
 | R05 | Direto | Correção certa de bug que mantém as regras | pass | R1 | I |
 | R06 | Direto | Mudança só em comentário | pass | R1 | I |
