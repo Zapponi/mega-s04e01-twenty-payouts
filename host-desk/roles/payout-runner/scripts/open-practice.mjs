@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { config, saveState, send } from '../lib/net.mjs';
 import { STATE_FILE } from '../extensions/vars.mjs';
 
-const URL_PRACTICE = 'https://hq.mega.dev/challenges/twenty-payouts/practice';
+const URL_PRACTICE = 'https://hq.mega.dev/challenges/looks-good-to-me/practice';
 process.env.ALLOWED_HOSTS = 'hq.mega.dev';
 process.env.WRITE_URLS = URL_PRACTICE; // this script may write to this one URL only
 process.env.RUN_ID ||= `open-practice-${new Date().toISOString().replace(/[:.]/g, '-')}`;

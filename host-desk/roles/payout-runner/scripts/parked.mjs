@@ -4,12 +4,17 @@
 //                       new     → pay the account the task asks for (its structured payout.account only)
 //                       decline → pay nothing, POST /parked { task, done: "declined" }
 //                       null    → not decided yet: no write, read again later
+//                     S04E02 (api-index parked.decisions): an `amount` > 0 is paid as given (on-file: to the account on
+//                     file; any other decision: to the account the task asks for); `amount` 0 → done: "declined". No
+//                     `amount`: the task's own amount by the payout rule, with the commission of this attempt's
+//                     /settings, read again here: a changed version stops every payout (declines still finish).
 // parked answer <n> — re-send only the answer of a parked task already paid (receipt from the journal).
 // Contract: API index, logs/manual/manual-2026-11-16T23-01-32-060Z.txt ("parked"). The decision is journaled, with the
 // time it was seen in the API, before the first write on that task (BRIEF M3). Silent while nothing changes.
 import { amountOf, claim, events, journal, statusOf } from '../lib/batch.mjs';
 import { parkedUrl, payoutsUrl, refusalOf, show, state, taskOf, taskVar } from '../lib/flow.mjs';
 import { send } from '../lib/net.mjs';
+import { readSettings, settingsOf } from '../lib/settings.mjs';
 
 const POLL_MS = Number(process.env.PARKED_POLL_MS || 10_000);
 const MAX_MS = Number(process.env.PARKED_MAX_MS || 110_000);
@@ -62,15 +67,42 @@ function stop(n, why) {
   say(`STOPPED task ${n}: ${why}. No write; tell the human.`);
 }
 
+/** The owner's amount as /parked shows it: undefined (none), a whole number ≥ 0, or { bad } for anything else. */
+function ownerAmount(entry) {
+  const v = entry?.amount;
+  if (v === undefined || v === null) return undefined;
+  return Number.isInteger(v) && v >= 0 ? v : { bad: JSON.stringify(v) };
+}
+
+// The settings the batch was paid with, and a fresh read now (only when a payout may follow): a different version
+// stops every payout here, so no owner task is paid with a commission the run did not use (plan.md § 4).
+let settingsNow;
+async function currentSettings() {
+  if (settingsNow) return settingsNow;
+  const before = settingsOf(st);
+  if (!before) return (settingsNow = { ok: false, why: 'no /settings read for this attempt is in the journal' });
+  const now = await readSettings(st, TIMEOUT_MS);
+  if (!now.ok) return (settingsNow = now);
+  if (now.version !== before.version || now.commissionPct !== before.commissionPct) {
+    journal({ event: 'settings_changed', attempt: st.ATTEMPT_SEEN_AT, before: before.version, now: now.version, beforePct: before.commissionPct, nowPct: now.commissionPct });
+    return (settingsNow = { ok: false, why: `/settings changed from ${before.version} (${before.commissionPct} %) to ${now.version} (${now.commissionPct} %) since the batch` });
+  }
+  return (settingsNow = now);
+}
+
 /** Acts on one decision that shows in /parked. Returns nothing; every outcome is journaled and printed. */
 async function act(n, decision, entry, seenAt) {
   const key = keyOf(n);
+  const own = ownerAmount(entry);
   const prior = events().filter((e) => e.key === key && e.event === 'decision');
   if (prior.length && prior.at(-1).decision !== decision) return stop(n, `/parked now says "${decision}", it said "${prior.at(-1).decision}" before`);
-  if (!prior.length) journal({ key, event: 'decision', n, decision, seenAt });
+  if (prior.length && prior.at(-1).amount !== (typeof own === 'number' ? own : undefined)) return stop(n, `/parked now shows amount ${JSON.stringify(entry.amount)}, it showed ${JSON.stringify(prior.at(-1).amount)} before`);
+  if (!prior.length) journal({ key, event: 'decision', n, decision, ...(typeof own === 'number' ? { amount: own } : {}), seenAt });
   const task = taskOf('run', n);
   if (!task || !st[taskVar('run', n)]) return stop(n, 'its task or token was not kept at the flag');
-  if (decision === 'decline') {
+  if (own && typeof own === 'object') return stop(n, `the owner's amount ${own.bad} is not a whole number of euros`);
+  if (decision === 'decline' && own > 0) return stop(n, `/parked says decline with amount ${own}`);
+  if (decision === 'decline' || own === 0) {
     if (!claim(key, 'owner-finish')) return say(`task ${n} is already being finished by another run: nothing sent.`);
     return finish(n, { done: 'declined' }, 'declined');
   }
@@ -81,7 +113,10 @@ async function act(n, decision, entry, seenAt) {
     if (entry.account !== undefined && entry.account !== account) return stop(n, `/parked names account ${JSON.stringify(entry.account)}, the task asks for ${JSON.stringify(account)}`);
   } else return stop(n, `unknown decision ${JSON.stringify(decision)}`);
   if (typeof account !== 'string' || !ACCOUNT.test(account)) return stop(n, `no structured account to pay (${JSON.stringify(account)})`);
-  const a = amountOf(task.booking);
+  const set = await currentSettings();
+  if (!set.ok) return stop(n, `${set.why}; no payout`);
+  // the owner's amount is paid as given (api-index: "`amount` > 0: pay it"); without one, the task's own amount
+  const a = own > 0 ? { ok: true, amount: own, owner: true } : amountOf(task.booking, set.commissionPct);
   if (!a.ok) return stop(n, a.why);
   // A booking and amount already sent under another task number is never paid twice, even after an owner's "yes":
   // the human hears of it instead (Sol re-review #1).
@@ -93,7 +128,7 @@ async function act(n, decision, entry, seenAt) {
   const tried = mine.findLast((e) => ['uncertain', 'moved'].includes(e.status)) ?? mine.find((e) => e.status === 'sent');
   if (tried) return stop(n, `a payout was already tried for this task (${tried.status}${tried.http ? `, http ${tried.http}` : ''}); never sent again. Only "decline" can finish it here`);
   if (!claim(key, 'owner-pay')) return say(`task ${n} is already being paid by another run: nothing sent.`);
-  journal({ key, status: 'sent', amount: a.amount, nights: a.nights, account, decision, bookingId: task.booking?.id });
+  journal({ key, status: 'sent', amount: a.amount, nights: a.nights, total: a.total, ...(a.owner ? { ownerAmount: true } : { commissionPct: set.commissionPct, settings: set.version }), account, decision, bookingId: task.booking?.id });
   const p = await send({
     method: 'POST',
     url: payoutsUrl(),
@@ -165,6 +200,11 @@ while (pending().length) {
       if (decisions.length === 0) continue; // null: not decided yet
       if (decisions.length > 1) {
         stop(n, `/parked shows ${decisions.join(' and ')} at once`);
+        continue;
+      }
+      const amounts = new Set(entries.filter((e) => e.decision === decisions[0]).map((e) => JSON.stringify(e.amount ?? null)));
+      if (amounts.size > 1) {
+        stop(n, `/parked shows amounts ${[...amounts].join(' and ')} at once`);
         continue;
       }
       await act(n, decisions[0], entries.find((e) => e.decision === decisions[0]), seenAt);

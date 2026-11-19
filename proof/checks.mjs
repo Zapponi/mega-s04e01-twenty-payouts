@@ -27,11 +27,29 @@ const isRun = (r) => path(r.url).endsWith('/run');
 const isParked = (r) => path(r.url).endsWith('/parked');
 const isPayout = (r) => path(r.url).endsWith('/payouts');
 
-/** The manual's rule: nights × nightly rate + cleaning fee, whole euros; null when the booking does not fit it. */
-export function expectedAmount(b) {
+/**
+ * The manual's rule (S04E02): the stay total (nights × nightly rate + cleaning fee) minus the house commission of this
+ * attempt's GET /settings, rounded down to whole euros (why/payout-rounding.md); null when the booking or the
+ * commission does not fit it.
+ */
+export function expectedAmount(b, pct) {
   if (!b || b.currency !== 'EUR' || !Number.isInteger(b.nightlyRate) || !Number.isInteger(b.cleaningFee)) return null;
+  if (typeof pct !== 'number' || !Number.isFinite(pct) || pct < 0 || pct >= 100) return null;
   const nights = (Date.parse(`${b.checkOut}T00:00:00Z`) - Date.parse(`${b.checkIn}T00:00:00Z`)) / DAY;
-  return Number.isInteger(nights) && nights >= 1 ? nights * b.nightlyRate + b.cleaningFee : null;
+  if (!Number.isInteger(nights) || nights < 1) return null;
+  return Math.floor(((nights * b.nightlyRate + b.cleaningFee) * (100 - pct)) / 100);
+}
+
+/** The commission of the last 2xx GET /settings before the run opened (same attempt), or null. */
+export function settingsBeforeRun(records) {
+  let open = -1;
+  records.forEach((r, i) => {
+    if (r.method === 'POST' && isRun(r) && ok2(r) && json(r.reqBody)?.attempt !== undefined) open = i;
+  });
+  if (open < 0) return null;
+  const s = records.slice(0, open).filter((r) => r.method === 'GET' && path(r.url).endsWith('/settings') && ok2(r) && sentReq(r)).at(-1);
+  const b = json(s?.resBody);
+  return b && typeof b.commissionPct === 'number' ? { version: b.version, commissionPct: b.commissionPct, time: s.time } : null;
 }
 
 export const accountOnFile = (manualText) => /account on file is (acct_[A-Za-z0-9]+)/i.exec(String(manualText ?? ''))?.[1] ?? null;
@@ -76,7 +94,7 @@ export function model(records) {
       writes.push({ ...r, n, kind });
     }
     if (r.method === 'GET' && isParked(r) && ok2(r) && Array.isArray(r.res?.parked)) {
-      for (const e of r.res.parked) if (e && e.decision !== null && e.decision !== undefined) decisions.push({ n: Number(e.n), decision: e.decision, i: r.i, time: r.time });
+      for (const e of r.res.parked) if (e && e.decision !== null && e.decision !== undefined) decisions.push({ n: Number(e.n), decision: e.decision, amount: e.amount, i: r.i, time: r.time });
     }
     if (isRun(r) && r.res?.status === 'task' && Number.isInteger(r.res.n)) {
       tasks.set(r.res.n, { booking: r.res.booking, payout: r.res.payout, timeLeftMs: r.res.timeLeftMs, runLimitMs: r.res.runLimitMs, of: r.res.of, arrived: r.time, i: r.i, res: r.res });
@@ -92,9 +110,9 @@ const list = (a) => (a.length ? a.join(', ') : 'none');
 // Where each secret may go on the real hosts (M8). Tests on a local fake pass their own.
 // { base }: that path and below on that origin; { exact }: that one endpoint.
 export const REAL_SCOPE = {
-  TICKET: [{ base: 'https://hq.mega.dev/challenges/twenty-payouts' }],
-  ATTEMPT: [{ base: 'https://hq.mega.dev/challenges/twenty-payouts' }],
-  PAYOUT_KEY: [{ exact: 'https://pay-s04.mega.dev/payouts' }],
+  TICKET: [{ base: 'https://hq.mega.dev/challenges/looks-good-to-me' }],
+  ATTEMPT: [{ base: 'https://hq.mega.dev/challenges/looks-good-to-me' }],
+  PAYOUT_KEY: [{ exact: 'https://pay-s04.mega.dev/looks-good-to-me/payouts' }],
 };
 /** Compares parsed, normalized URLs (default port, dot segments), never text prefixes (Sol review P3). */
 function allowed(url, spec) {
@@ -166,7 +184,7 @@ export function checks({ records, journal = [], manualText = '', checkLane = [],
     const after = writes.filter((w) => w.n === n && w.i > flag.i);
     if (after.length && (!dec || after[0].i < dec.i || Date.parse(after[0].time) < Date.parse(dec.time))) m3.push(`${n}: ${after[0].kind} at ${after[0].time} before any decision in /parked`);
     if (!dec) m3.push(`${n}: no decision seen in /parked`);
-    else if (!done(n, dec.decision === 'decline' ? ['declined'] : ['parkedAnswer'])) m3.push(`${n}: decided "${dec.decision}" but not finished`);
+    else if (!done(n, dec.decision === 'decline' || dec.amount === 0 ? ['declined'] : ['parkedAnswer'])) m3.push(`${n}: decided "${dec.decision}"${dec.amount !== undefined ? ` with amount ${dec.amount}` : ''} but not finished`);
   }
   add('M3', m3.length === 0, `${flagged.length} owner task(s): ${list(flagged.map(String))}; problems: ${list(m3)}`);
 
@@ -189,17 +207,22 @@ export function checks({ records, journal = [], manualText = '', checkLane = [],
   // M6: target and amount follow the manual; an owner task goes where the owner decided; answers carry the real
   // amount and the receipt the payout API gave.
   const onFile = accountOnFile(manualText);
+  const settings = settingsBeforeRun(records);
   const m6 = [];
   if (!onFile) m6.push('no account on file in the saved manual');
+  if (!settings) m6.push('no 2xx GET /settings before the run opened: no commission to check the amounts against');
   for (const p of pays) {
     const t = tasks.get(p.n);
     if (!t) {
       m6.push(`payout for an unknown task (${p.req?.task})`);
       continue;
     }
-    const want = expectedAmount(t.booking);
+    const decision = decisions.find((d) => d.n === p.n && d.i < p.i);
+    const dec = decision?.decision;
+    // an owner's amount > 0 is paid as given (S04E02 api-index parked.decisions); else the rule
+    const want = flagged.includes(p.n) && decision?.amount > 0 ? decision.amount : expectedAmount(t.booking, settings?.commissionPct);
     if (p.req?.amount !== want) m6.push(`task ${p.n}: paid ${p.req?.amount}, the rule gives ${want}`);
-    const dec = decisions.find((d) => d.n === p.n && d.i < p.i)?.decision;
+    if (decision?.amount === 0 || dec === 'decline') m6.push(`task ${p.n}: paid although the owner declined it`);
     let target = onFile;
     // a payout the API did not take (real run 3, task 11: 307 "moved", not followed) moved no money: its account is
     // the on-file one the script sent, and the task then went to the owner
@@ -215,7 +238,7 @@ export function checks({ records, journal = [], manualText = '', checkLane = [],
     else if (a.req?.payout !== receipt) m6.push(`task ${a.n}: the answer's receipt is not the one the payout API gave`);
     if (a.req?.answer !== p?.req?.amount) m6.push(`task ${a.n}: answered ${a.req?.answer}, paid ${p?.req?.amount}`);
   }
-  add('M6', m6.length === 0, `account on file ${onFile ?? '?'}; ${pays.length} payout(s) and ${writes.filter((w) => ['answer', 'parkedAnswer'].includes(w.kind)).length} answer(s) checked; problems: ${list(m6)}`);
+  add('M6', m6.length === 0, `account on file ${onFile ?? '?'}; commission ${settings?.commissionPct ?? '?'} % (${settings?.version ?? 'no settings'}); ${pays.length} payout(s) and ${writes.filter((w) => ['answer', 'parkedAnswer'].includes(w.kind)).length} answer(s) checked; problems: ${list(m6)}`);
 
   // M7: every refusal is in the journal, its need went to check-lane, and nothing was sent on that task after it.
   const m7 = [];

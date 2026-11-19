@@ -1,5 +1,14 @@
 # Lab — expected results (written before any lab run)
 
+**S04E02 update (issue #22, 2026-11-19, written with the code, before any model run).** The scenario below stays, with these changes (`lab/CASES.md` B01–B28):
+- `GET /settings` (Bearer attempt) gives `{ version: "lab-2026-11-19.22", commissionPct: 22 }`. Every payout is `Math.floor(total × 0.78)`, except an owner's `amount` > 0, paid as given. `/settings` is read before `POST /run` with the batch's own attempt.
+- The lab vars hold a fake reviewer `ATTEMPT`. The mock records every request that carries it, or any other wrong attempt (`wrong_attempt`); there must be none (B09).
+- The run limit is 9000 ms (not the remembered 6000), shown in task 1, and the reply to `POST /run { attempt }` comes 700 ms late; the clock starts at the request (B17).
+- Owner decisions: 3 `decline`; 6 `new` without `amount` (paid the rule's amount to `acct_lab0new6`, B27); 9 `on-file` with `amount: 500` (paid 500 to the account on file, B12); 15 `on-file` with `amount: 0` (finished `done: declined`, nothing paid, B13); 17 `decline`.
+- The refusal of task 20 carries a `pointer` (B18).
+- New checks: **L.settings**, **L.int** (every amount a JSON integer), **L.practice** (3 practice tasks paid once and answered), **L.token** (each `/parked` finish uses its own flagged task's token), **L.limit**. `./verify --lab` also prints one line per case B01–B28 (lab checks plus the named unit tests, `proof/lab.mjs` `BATCH_CASES`).
+- Where this file says 6000 ms or "the manual's rule" below, read 9000 ms and the rule with the commission.
+
 Source: plan.md § 4; issue #7; BRIEF.md pre-mortem. The mock (`lab/mock-api.mjs`) follows the API index and the real practice replies (KEEP.md). It writes its ground truth to `lab/out/<run>/truth.jsonl`. `./verify --lab` reads that truth, our request log and our journal, never the agent's report on itself.
 
 ## Scenario `main`

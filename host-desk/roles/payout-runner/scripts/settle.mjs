@@ -8,6 +8,7 @@
 import { amountOf, claim, events, journal, oddFields, release, statusOf, targetOf } from '../lib/batch.mjs';
 import { batchArg, batchUrl, captureTask, current, payoutsUrl, refusalOf, saveCurrent, show, state, taskVar } from '../lib/flow.mjs';
 import { send } from '../lib/net.mjs';
+import { settingsOf } from '../lib/settings.mjs';
 
 const TIMEOUT_MS = Number(process.env.SETTLE_TIMEOUT_MS || 4000);
 const batch = batchArg(process.argv[2]);
@@ -109,7 +110,8 @@ if (action !== 'pay') {
   console.log('Second argument: pay, flag "<reason>" or answer.');
   process.exit(2);
 }
-const a = amountOf(task.booking);
+const settings = settingsOf(st);
+const a = settings ? amountOf(task.booking, settings.commissionPct) : { ok: false, why: 'no /settings read for this attempt is in the journal (start.mjs reads it)' };
 if (!a.ok) {
   console.log(`NOT PAID, task ${task.n}: ${a.why}. Nothing was sent. Decide: flag it for the owner (run) or stop and tell the human.`);
   process.exit(1);
@@ -132,7 +134,7 @@ if (again) {
   process.exit(1);
 }
 take();
-journal({ key, status: 'sent', amount: a.amount, nights: a.nights, account: st.ACCOUNT_ON_FILE, bookingId: task.booking.id });
+journal({ key, status: 'sent', amount: a.amount, nights: a.nights, total: a.total, commissionPct: settings.commissionPct, settings: settings.version, account: st.ACCOUNT_ON_FILE, bookingId: task.booking.id });
 const p = await send({
   method: 'POST',
   url: payoutsUrl(),

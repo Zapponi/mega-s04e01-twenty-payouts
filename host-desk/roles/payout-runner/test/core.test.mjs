@@ -142,10 +142,10 @@ for (const [decision, account] of [['on-file', ON_FILE], ['new', 'acct_other0002
     assert.equal(p.code, 0, p.out);
     const paid = pays().filter((h) => h.body.task === token('run', 2));
     assert.equal(paid.length, 1);
-    assert.deepEqual(paid[0].body, { task: token('run', 2), account, amount: 8 * 202 + 30 });
+    assert.deepEqual(paid[0].body, { task: token('run', 2), account, amount: Math.floor((8 * 202 + 30) * 0.8) });
     const post = parkedPosts();
     assert.equal(post.length, 1);
-    assert.deepEqual(post[0].body, { task: token('run', 2), answer: 1646, payout: `v1.rcpt_2_${account}_1646` });
+    assert.deepEqual(post[0].body, { task: token('run', 2), answer: 1316, payout: `v1.rcpt_2_${account}_1316` });
     const firstRead = fake.hits.findIndex((h) => h.path === '/parked' && h.method === 'GET');
     assert.ok(fake.hits.indexOf(paid[0]) > firstRead);
     const j = journal().filter((e) => e.key?.startsWith('run:2:'));
@@ -245,7 +245,7 @@ test('account from text: prose naming another account never moves money; the str
   fake.parked.set(2, 'new');
   assert.equal((await run('parked.mjs')).code, 0);
   const by = (n) => pays().find((h) => h.body.task === token('run', n)).body;
-  assert.deepEqual(by(1), { task: token('run', 1), account: ON_FILE, amount: 8 * 201 + 30 }, '"on-file" pays the account on file');
+  assert.deepEqual(by(1), { task: token('run', 1), account: ON_FILE, amount: Math.floor((8 * 201 + 30) * 0.8) }, '"on-file" pays the account on file');
   assert.equal(by(2).account, 'acct_other0002', '"new" pays the structured payout.account, never the prose');
   assert.ok(!pays().some((h) => h.body.account === 'acct_attacker9' || h.body.amount === 9999));
 });
@@ -747,4 +747,171 @@ test('journal status with nothing done says: fetch the manual once', async () =>
   assert.equal(r.code, 0);
   assert.match(r.out, /attempt: none open/);
   assert.match(r.out, /next: fetch the manual/);
+});
+
+// ---- S04E02 (issue #22, plan.md § 4) ----
+
+/** A run of n tasks whose tasks `owner` ask for another account, all flagged by the routine; returns nothing. */
+async function flaggedRun(n, owner) {
+  const over = Object.fromEntries(owner.map((k) => [k, { payout: { account: `acct_other000${k}` } }]));
+  fake.reset({ runTasks: n, over, settings: fake.settings });
+  assert.match((await fetchManual()).out, /^200 /);
+  const r = await run('routine.mjs', 'run');
+  assert.equal(r.code, 0, r.out);
+}
+
+test('S04E02: the routine reads /settings before it opens the run and pays with that commission (B02)', async () => {
+  fake.reset({ runTasks: 2, settings: [{ version: 'v22', commissionPct: 22 }] });
+  assert.match((await fetchManual()).out, /^200 /);
+  const r = await run('routine.mjs', 'run');
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /SETTINGS v22: commission 22 %/);
+  const settingsAt = fake.hits.findIndex((h) => h.path === '/settings');
+  const openAt = fake.hits.findIndex((h) => h.path === '/run' && h.body.attempt);
+  assert.ok(settingsAt >= 0 && settingsAt < openAt, '/settings is read before POST /run');
+  assert.deepEqual(pays().map((h) => h.body.amount), [1, 2].map((k) => Math.floor((8 * (200 + k) + 30) * 0.78)));
+  for (const h of pays()) assert.ok(Number.isInteger(h.body.amount), 'a JSON integer (B26)');
+});
+
+test('S04E02: no usable /settings → the run is not opened, nothing paid', async () => {
+  for (const settings of [[{ code: 500, body: { error: 'boom' } }], [{ version: 'v', commissionPct: '20' }], [{ commissionPct: 20 }]]) {
+    fake.reset({ runTasks: 2, settings });
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dirname(env.STATE_FILE), { recursive: true });
+    assert.match((await fetchManual()).out, /^200 /);
+    const r = await run('routine.mjs', 'run');
+    assert.notEqual(r.code, 0, r.out);
+    assert.match(r.out, /NOT opened/);
+    assert.equal(fake.hits.filter((h) => h.path === '/run').length, 0, JSON.stringify(settings));
+    assert.equal(pays().length, 0);
+  }
+});
+
+test('S04E02: the routine does not open a batch on an attempt about to expire', async () => {
+  fake.reset({ runTasks: 2 });
+  assert.match((await fetchManual()).out, /^200 /);
+  const st = JSON.parse(readFileSync(env.STATE_FILE, 'utf8'));
+  writeFileSync(env.STATE_FILE, JSON.stringify({ ...st, ATTEMPT_EXPIRES_AT: new Date(Date.now() + 5 * 60_000).toISOString() }));
+  const r = await run('routine.mjs', 'run');
+  assert.equal(r.code, 6, r.out);
+  assert.equal(fake.hits.filter((h) => h.path === '/run' || h.path === '/settings').length, 0);
+});
+
+test('S04E02: the reviewer\'s ATTEMPT in vars.json is never used by the batch (B09)', async () => {
+  writeFileSync(env.VARS_FILE = join(dir, 'vars-shared.json'), JSON.stringify({ ...FAKE, ATTEMPT: 'att_SECRET_attempt_REVIEWER_zz' }));
+  fake.reset({ runTasks: 2 });
+  assert.match((await fetchManual()).out, /^200 /);
+  const r = await run('routine.mjs', 'run');
+  assert.equal(r.code, 0, r.out);
+  const auths = fake.hits.filter((h) => h.path === '/settings').map((h) => h.headers.authorization);
+  const opens = fake.hits.filter((h) => h.body?.attempt).map((h) => h.body.attempt);
+  for (const a of [...auths, ...opens]) assert.ok(!a.includes('REVIEWER'), `the batch sent the reviewer's attempt: ${a.slice(0, 30)}`);
+  assert.equal(opens[0], 'att_SECRET_attempt_1_zz', 'the batch uses the attempt of its own manual fetch');
+  assert.ok(!filesText().includes('att_SECRET_attempt_REVIEWER_zz'), 'the reviewer\'s attempt stays masked');
+  env.VARS_FILE = join(tmp, 'vars.json');
+});
+
+test('S04E02: the reviewer\'s ATTEMPT never reaches a host outside the course API', async () => {
+  const { loadVars } = await import(pathToFileURL(join(role, 'extensions/vars.mjs')).href);
+  const { scopeOf, config } = await import(netUrl);
+  const prev = process.env.VARS_FILE;
+  process.env.VARS_FILE = join(dir, 'v.json');
+  writeFileSync(process.env.VARS_FILE, JSON.stringify({ ATTEMPT: 'att_REVIEWER_1234' }));
+  const v = loadVars();
+  process.env.VARS_FILE = prev;
+  assert.equal(v.ATTEMPT, undefined);
+  assert.equal(v.ATTEMPT_PREV_0, 'att_REVIEWER_1234');
+  assert.deepEqual(scopeOf('ATTEMPT_PREV_0', config({})), [{ base: 'https://hq.mega.dev/challenges/looks-good-to-me' }]);
+});
+
+for (const [name, decision, amount, want] of [
+  ['an owner amount > 0 is paid as given, to the account on file (B12)', 'on-file', 777, { account: ON_FILE, amount: 777 }],
+  ['an owner amount > 0 with "new" goes to the account the task asks for (B12)', 'new', 640, { account: 'acct_other0002', amount: 640 }],
+  ['"new" without an amount pays the task\'s own amount to its account (B27)', 'new', undefined, { account: 'acct_other0002', amount: Math.floor((8 * 202 + 30) * 0.8) }],
+]) {
+  test(`S04E02 /parked: ${name}`, async () => {
+    await flaggedRun(2, [2]);
+    fake.parked.set(2, { decision, ...(amount === undefined ? {} : { amount }) });
+    const p = await run('parked.mjs');
+    assert.equal(p.code, 0, p.out);
+    const paid = pays().filter((h) => h.body.task === token('run', 2));
+    assert.equal(paid.length, 1);
+    assert.deepEqual(paid[0].body, { task: token('run', 2), ...want });
+    assert.deepEqual(parkedPosts().map((h) => h.body), [{ task: token('run', 2), answer: want.amount, payout: `v1.rcpt_2_${want.account}_${want.amount}` }], 'finished with the flagged task\'s own token (B28)');
+  });
+}
+
+test('S04E02 /parked: amount 0 finishes as declined, nothing paid (B13)', async () => {
+  await flaggedRun(2, [2]);
+  fake.parked.set(2, { decision: 'on-file', amount: 0 });
+  const p = await run('parked.mjs');
+  assert.equal(p.code, 0, p.out);
+  assert.equal(pays().filter((h) => h.body.task === token('run', 2)).length, 0);
+  assert.deepEqual(parkedPosts().map((h) => h.body), [{ task: token('run', 2), done: 'declined' }]);
+});
+
+test('S04E02 /parked: a bad owner amount, or decline with an amount, stops the task with no write', async () => {
+  for (const entry of [{ decision: 'on-file', amount: 12.5 }, { decision: 'on-file', amount: '700' }, { decision: 'on-file', amount: -3 }, { decision: 'decline', amount: 500 }]) {
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dirname(env.STATE_FILE), { recursive: true });
+    await flaggedRun(2, [2]);
+    fake.parked.set(2, entry);
+    const p = await run('parked.mjs');
+    assert.notEqual(p.code, 0, p.out);
+    assert.match(p.out, /STOPPED task 2/, JSON.stringify(entry));
+    assert.equal(pays().filter((h) => h.body.task === token('run', 2)).length, 0);
+    assert.equal(parkedPosts().length, 0);
+  }
+});
+
+test('S04E02 /parked: two amounts for one task, at once or across reads, stop it with no write (B15)', async () => {
+  await flaggedRun(2, [2]);
+  fake.parked.set(2, { decision: 'on-file', amount: 500 });
+  fake.dupEntries = false;
+  // the same read shows two amounts
+  const origReset = fake.parked;
+  fake.decideAfter = {};
+  const list = [{ n: 2, decision: 'on-file', amount: 500 }, { n: 2, decision: 'on-file', amount: 600 }];
+  const handler = fake.server.listeners('request')[0];
+  fake.server.removeAllListeners('request');
+  fake.server.on('request', (req, res) => {
+    if (req.url === '/parked' && req.method === 'GET') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify({ parked: list }));
+    }
+    handler(req, res);
+  });
+  try {
+    const p = await run('parked.mjs');
+    assert.match(p.out, /STOPPED task 2: \/parked shows amounts 500 and 600 at once/);
+    assert.equal(pays().filter((h) => h.body.task === token('run', 2)).length, 0);
+  } finally {
+    fake.server.removeAllListeners('request');
+    fake.server.on('request', handler);
+    fake.parked = origReset;
+  }
+});
+
+test('S04E02 /parked: a /settings version changed since the batch stops payouts; a decline still finishes (B16)', async () => {
+  fake.reset({ runTasks: 3, over: { 2: { payout: { account: 'acct_other0002' } }, 3: { payout: { account: 'acct_other0003' } } }, settings: [{ version: 'v1', commissionPct: 20 }, { version: 'v2', commissionPct: 25 }] });
+  assert.match((await fetchManual()).out, /^200 /);
+  assert.equal((await run('routine.mjs', 'run')).code, 0);
+  fake.parked.set(2, 'on-file');
+  fake.parked.set(3, 'decline');
+  const p = await run('parked.mjs');
+  assert.match(p.out, /STOPPED task 2: \/settings changed from v1 \(20 %\) to v2 \(25 %\)/);
+  assert.equal(pays().filter((h) => h.body.task === token('run', 2)).length, 0);
+  assert.deepEqual(parkedPosts().map((h) => h.body), [{ task: token('run', 3), done: 'declined' }]);
+  assert.ok(journal().some((e) => e.event === 'settings_changed'));
+});
+
+test('S04E02: the deadline comes from the first task\'s runLimitMs, not from 6000 ms (B17)', async () => {
+  // a 20 s limit and slow payouts: 6 × 1.2 s = 7.2 s would break a 6 s budget, not this one
+  fake.reset({ runTasks: 6, runLimitMs: 20_000, payoutDelayMs: 1200 });
+  assert.match((await fetchManual()).out, /^200 /);
+  const r = await run('routine.mjs', 'run');
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /runLimitMs 20000/);
+  assert.equal(pays().length, 6);
+  assert.match(r.out, /answered \[1,2,3,4,5,6\]/);
 });

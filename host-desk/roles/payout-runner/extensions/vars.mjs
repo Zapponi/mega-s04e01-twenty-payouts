@@ -24,7 +24,15 @@ const readVars = (file) => {
 
 /** name → value, from vars.json (or VARS_FILE, for tests) plus the run-time state file. Missing file or bad JSON → no vars. */
 export function loadVars() {
-  return { ...readVars(STATE_FILE()), ...readVars(process.env.VARS_FILE || join(DESK, 'vars.json')) };
+  const shared = readVars(process.env.VARS_FILE || join(DESK, 'vars.json'));
+  // The shared vars.json may hold another role's ATTEMPT (the reviewer's, S04E02). The batch uses only the attempt of
+  // its own manual fetch, from the state file: the shared one is kept as ATTEMPT_PREV_0, so it stays masked and
+  // scoped to the course API, but {{ATTEMPT}} never means it (plan.md § 4, case B09).
+  if ('ATTEMPT' in shared) {
+    shared.ATTEMPT_PREV_0 = shared.ATTEMPT;
+    delete shared.ATTEMPT;
+  }
+  return { ...shared, ...readVars(STATE_FILE()) };
 }
 
 /** Replaces every {{NAME}} with its value; an unknown name stays as written. */

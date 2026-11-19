@@ -85,12 +85,12 @@ test('M8 fails when a request that left carried the payout key to another URL (r
 test('M8 compares parsed URLs on the real scope: lookalike paths fail, equivalent URLs pass, old aliases count (Sol P3/P4)', () => {
   const rec = (url, headers, body) => ({ time: 't', method: 'POST', url, reqHeaders: headers, reqBody: body, status: 200 });
   const m8 = (recs) => checks({ records: recs, expectOf: 20 }).find((r) => r.id === 'M8');
-  const man = { time: 't', method: 'GET', url: 'https://hq.mega.dev/challenges/twenty-payouts/manual', reqHeaders: { authorization: 'Bearer {{TICKET}}' }, status: 200 };
-  assert.equal(m8([man, rec('https://hq.mega.dev/challenges/twenty-payoutsX/run', { authorization: 'Bearer {{TICKET}}' })]).ok, false, 'twenty-payoutsX is not the API');
-  assert.equal(m8([man, rec('https://pay-s04.mega.dev/payouts/../collect', { 'x-payout-key': '{{PAYOUT_KEY}}' })]).ok, false, '/collect is not /payouts');
-  assert.equal(m8([man, rec('https://pay-s04.mega.dev/payouts/sub', { 'x-payout-key': '{{PAYOUT_KEY}}' })]).ok, false, 'below /payouts is not /payouts');
-  assert.equal(m8([man, rec('https://pay-s04.mega.dev:443/payouts', { 'x-payout-key': '{{PAYOUT_KEY}}' })]).ok, true, 'the default port is the same URL');
-  assert.equal(m8([man, rec('https://pay-s04.mega.dev/payouts', {}, '{"attempt":"{{ATTEMPT_PREV_1}}"}')]).ok, false, 'an old attempt to the payout host');
+  const man = { time: 't', method: 'GET', url: 'https://hq.mega.dev/challenges/looks-good-to-me/manual', reqHeaders: { authorization: 'Bearer {{TICKET}}' }, status: 200 };
+  assert.equal(m8([man, rec('https://hq.mega.dev/challenges/looks-good-to-meX/run', { authorization: 'Bearer {{TICKET}}' })]).ok, false, 'looks-good-to-meX is not the API');
+  assert.equal(m8([man, rec('https://pay-s04.mega.dev/looks-good-to-me/payouts/../collect', { 'x-payout-key': '{{PAYOUT_KEY}}' })]).ok, false, '/collect is not /payouts');
+  assert.equal(m8([man, rec('https://pay-s04.mega.dev/looks-good-to-me/payouts/sub', { 'x-payout-key': '{{PAYOUT_KEY}}' })]).ok, false, 'below /payouts is not /payouts');
+  assert.equal(m8([man, rec('https://pay-s04.mega.dev:443/looks-good-to-me/payouts', { 'x-payout-key': '{{PAYOUT_KEY}}' })]).ok, true, 'the default port is the same URL');
+  assert.equal(m8([man, rec('https://pay-s04.mega.dev/looks-good-to-me/payouts', {}, '{"attempt":"{{ATTEMPT_PREV_1}}"}')]).ok, false, 'an old attempt to the payout host');
 });
 
 test('no run in the log: every must check fails', () => {

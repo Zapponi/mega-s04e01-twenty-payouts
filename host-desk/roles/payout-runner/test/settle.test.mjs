@@ -36,6 +36,7 @@ await (async () => {
       const b = body ? JSON.parse(body) : {};
       hits.push({ path: req.url, body: b, headers: req.headers });
       const json = (code, o) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
+      if (req.url === '/settings') return json(200, { version: 'fake-s.1', commissionPct: 20 });
       if (req.url === '/payouts') {
         if (mode.payoutDelayMs) await new Promise((r) => setTimeout(r, mode.payoutDelayMs));
         if (mode.payout500) return json(500, { error: 'boom' });
@@ -69,7 +70,7 @@ beforeEach(() => {
   writeFileSync(env.STATE_FILE, JSON.stringify({ ATTEMPT: 'att_FAKE_secret_attempt', ATTEMPT_SEEN_AT: '2026-11-16T00:00:00Z', ACCOUNT_ON_FILE: ON_FILE }));
   // the key check of this attempt passed (start.mjs run requires it)
   mkdirSync(env.JOURNAL_DIR, { recursive: true });
-  writeFileSync(join(env.JOURNAL_DIR, 'journal.jsonl'), `${JSON.stringify({ time: '2026-11-16T00:00:01Z', event: 'key_checked', attempt: '2026-11-16T00:00:00Z', ok: true })}\n`);
+  writeFileSync(join(env.JOURNAL_DIR, 'journal.jsonl'), `${JSON.stringify({ time: '2026-11-16T00:00:01Z', event: 'key_checked', attempt: '2026-11-16T00:00:00Z', ok: true })}\n${JSON.stringify({ time: '2026-11-16T00:00:02Z', event: 'settings', attempt: '2026-11-16T00:00:00Z', version: 'fake-s.1', commissionPct: 20 })}\n`);
 });
 
 // Async: the fake API runs in this process, so a blocking spawn would deadlock it.
@@ -87,13 +88,32 @@ const noSecrets = (text, where) => {
 };
 
 test('amount follows the manual formula, in whole euros', async () => {
-  assert.deepEqual(amountOf(task(1).booking), { ok: true, nights: 8, amount: 1750 });
-  assert.equal(amountOf({ checkIn: '2027-01-31', checkOut: '2027-02-01', nightlyRate: 100, cleaningFee: 0, currency: 'EUR' }).amount, 100);
-  assert.equal(amountOf({ checkIn: '2028-02-28', checkOut: '2028-03-01', nightlyRate: 10, cleaningFee: 5, currency: 'EUR' }).amount, 25, 'leap year');
-  assert.equal(amountOf({ checkIn: '2027-03-28', checkOut: '2027-03-28', nightlyRate: 1, cleaningFee: 1, currency: 'EUR' }).ok, false, 'zero nights');
-  assert.equal(amountOf({ checkIn: '2027-03-28', checkOut: '2027-04-05', nightlyRate: 215, cleaningFee: 30, currency: 'USD' }).ok, false, 'not EUR');
-  assert.equal(amountOf({ checkIn: '2027-03-28', checkOut: '2027-04-05', nightlyRate: 215.5, cleaningFee: 30, currency: 'EUR' }).ok, false, 'not whole euros');
-  assert.equal(amountOf({ checkIn: '28/03/2027', checkOut: '2027-04-05', nightlyRate: 215, cleaningFee: 30, currency: 'EUR' }).ok, false);
+  const B = (over = {}) => ({ checkIn: '2027-03-28', checkOut: '2027-04-05', nightlyRate: 215, cleaningFee: 30, currency: 'EUR', ...over });
+  assert.deepEqual(amountOf(task(1).booking, 0), { ok: true, nights: 8, total: 1750, amount: 1750 });
+  assert.equal(amountOf({ checkIn: '2027-01-31', checkOut: '2027-02-01', nightlyRate: 100, cleaningFee: 0, currency: 'EUR' }, 0).amount, 100);
+  assert.equal(amountOf({ checkIn: '2028-02-28', checkOut: '2028-03-01', nightlyRate: 10, cleaningFee: 5, currency: 'EUR' }, 0).amount, 25, 'leap year');
+  assert.equal(amountOf(B({ checkOut: '2027-03-28', nightlyRate: 1, cleaningFee: 1 }), 20).ok, false, 'zero nights (B08)');
+  assert.equal(amountOf(B({ currency: 'USD' }), 20).ok, false, 'not EUR');
+  assert.equal(amountOf(B({ nightlyRate: 215.5 }), 20).ok, false, 'not whole euros');
+  assert.equal(amountOf(B({ checkIn: '28/03/2027' }), 20).ok, false);
+});
+
+test('S04E02 commission: total minus the commission of /settings, rounded down (B02, B04)', () => {
+  const B = { checkIn: '2027-03-28', checkOut: '2027-04-05', nightlyRate: 215, cleaningFee: 30, currency: 'EUR' }; // total 1750
+  assert.deepEqual(amountOf(B, 22), { ok: true, nights: 8, total: 1750, amount: 1365 }, '1750 × 0.78 = 1365');
+  assert.equal(amountOf(B, 18).amount, 1435, '1750 × 0.82 = 1435');
+  assert.equal(amountOf(B, 14).amount, 1505);
+  assert.equal(amountOf({ ...B, cleaningFee: 31 }, 22).amount, 1365, '1751 × 0.78 = 1365.78 → 1365, never rounded up');
+  assert.equal(amountOf({ ...B, cleaningFee: 33 }, 18).amount, 1437, '1753 × 0.82 = 1437.46 → 1437');
+});
+
+test('S04E02 commission: no payout without a usable commission, and none when the two roundings disagree', () => {
+  const B = { checkIn: '2027-03-28', checkOut: '2027-03-29', nightlyRate: 500, cleaningFee: 0, currency: 'EUR' }; // total 500
+  for (const bad of [undefined, null, '20', NaN, -1, 100, 150]) assert.equal(amountOf(B, bad).ok, false, `commission ${String(bad)}`);
+  const r = amountOf(B, 7); // exact 465; float 500 × (1 − 0.07) = 464.99999999999994 → 464
+  assert.equal(r.ok, false);
+  assert.match(r.why, /465 or 464/);
+  assert.equal(amountOf(B, 12.5).amount, 437, 'a fractional rate is computed exactly');
 });
 
 test('target: the account on file pays; any other account is the owner\'s call', async () => {
@@ -108,10 +128,10 @@ test('pay: one payout to the account on file, then the answer with the receipt; 
   assert.equal(r.code, 0, r.out);
   const pays = hits.filter((h) => h.path === '/payouts');
   assert.equal(pays.length, 1);
-  assert.deepEqual(pays[0].body, { task: TOKEN(1), account: ON_FILE, amount: 1750 });
+  assert.deepEqual(pays[0].body, { task: TOKEN(1), account: ON_FILE, amount: 1400 });
   assert.equal(pays[0].headers['x-payout-key'], FAKE.PAYOUT_KEY);
   const ans = hits.filter((h) => h.path === '/practice' && h.body.answer !== undefined);
-  assert.deepEqual(ans[0].body, { task: TOKEN(1), answer: 1750, payout: 'rcpt_xxxx_1750' });
+  assert.deepEqual(ans[0].body, { task: TOKEN(1), answer: 1400, payout: 'rcpt_xxxx_1400' });
   assert.match(r.out, /ANSWERED task 1/);
   noSecrets(r.out, 'settle output');
   noSecrets(allText(), 'logs and journal');

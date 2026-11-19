@@ -165,7 +165,7 @@ test('a host outside the allowlist is refused and never sent', async () => {
 
 test('https is required outside localhost', async () => {
   process.env.ALLOWED_HOSTS = 'hq.mega.dev';
-  const r = await send({ url: 'http://hq.mega.dev/challenges/twenty-payouts/api' });
+  const r = await send({ url: 'http://hq.mega.dev/challenges/looks-good-to-me/api' });
   assert.match(r.refused, /https/);
 });
 

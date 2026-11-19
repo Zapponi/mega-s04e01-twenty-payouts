@@ -9,8 +9,9 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { STATE_FILE } from '../extensions/vars.mjs';
 
-export const API = 'https://hq.mega.dev/challenges/twenty-payouts';
-export const PAYOUTS = 'https://pay-s04.mega.dev/payouts';
+// S04E02 (logs/s04e02/api-index.txt): the course base and the payout endpoint of "Looks good to me".
+export const API = 'https://hq.mega.dev/challenges/looks-good-to-me';
+export const PAYOUTS = 'https://pay-s04.mega.dev/looks-good-to-me/payouts';
 export const batchUrl = (batch) => `${process.env.API_BASE || API}/${batch}`;
 export const payoutsUrl = () => process.env.PAYOUTS_URL || PAYOUTS;
 
@@ -23,6 +24,7 @@ export function state() {
 }
 
 export const parkedUrl = () => `${process.env.API_BASE || API}/parked`;
+export const settingsUrl = () => `${process.env.API_BASE || API}/settings`;
 export const verifyUrl = () => `${process.env.VERIFY_BASE || 'https://verify-s04.mega.dev'}/{{VERIFY_PATH}}`;
 
 const currentFile = (batch) => join(dirname(STATE_FILE()), `current-${batch}.json`);

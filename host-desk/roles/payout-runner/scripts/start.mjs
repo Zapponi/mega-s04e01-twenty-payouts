@@ -4,6 +4,7 @@
 import { claim, journal, events } from '../lib/batch.mjs';
 import { batchArg, batchUrl, captureTask, refusalOf, saveCurrent, show, state } from '../lib/flow.mjs';
 import { send } from '../lib/net.mjs';
+import { readSettings } from '../lib/settings.mjs';
 
 const batch = batchArg(process.argv[2]);
 const st = state();
@@ -19,6 +20,13 @@ if (events().some((e) => e.event === 'opened' && e.batch === batch && e.attempt 
   console.log(`The ${batch} is already open for this attempt; never open it twice. Run journal.mjs status and continue with settle${batch === 'run' ? ' or parked' : ''}.`);
   process.exit(1);
 }
+// This attempt's settings before the open (S04E02: the commission changes per attempt; plan.md § 4).
+const set = await readSettings(st);
+if (!set.ok) {
+  console.log(`${set.why}. The ${batch} was NOT opened${set.need ? `; need: ${set.need}. The harness calls check-lane with the need` : ''}. Tell the human.`);
+  process.exit(set.need ? 5 : 1);
+}
+console.log(`SETTINGS ${set.version}: commission ${set.commissionPct} %.`);
 // Claimed and journaled before the send: an open whose reply is lost may have landed, and is never sent again
 // (Sol review A #2).
 if (!claim(`open:${batch}:${st.ATTEMPT_SEEN_AT}`, 'open')) {
