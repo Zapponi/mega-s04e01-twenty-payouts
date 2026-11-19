@@ -46,7 +46,7 @@ const later = (e, ms) => ({ ...e, t: new Date(Date.parse(e.t) + ms).toISOString(
 
 test('the scripted agent passes every lab check: the whole run in one routine, inside the 6 s run limit', () => {
   for (const r of labChecks(base)) assert.ok(r.ok, `${r.id}: ${r.detail}`);
-  assert.match(labChecks(base).find((r) => r.id === 'L.M2').detail, /run limit 6000 ms/);
+  assert.match(labChecks(base).find((r) => r.id === 'L.M2').detail, /run limit 9000 ms/);
   assert.ok(base.secrets.length > 20, 'tokens and the verify path are searched');
 });
 

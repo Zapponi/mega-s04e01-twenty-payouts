@@ -32,12 +32,15 @@ export async function startFake() {
       this.replyDelay = opts.replyDelay ?? {}; // 'POST /run' → ms: processed at once, answered late
       this.attempts = 0;
       this.connections = 0;
+      // GET /settings (S04E02): one reply per read, the last one repeated; { code, body } for a failure
+      this.settings = opts.settings ?? [{ version: 'fake-2026-11-19.1', commissionPct: 20 }];
+      this.settingsReads = 0;
     },
     task(batch, n) {
       const o = batch === 'run' ? this.over[n] ?? {} : {};
       return {
         status: 'task', n, of: this.of[batch], ...(n === 1 ? { runLimitMs: this.runLimitMs } : {}), timeLeftMs: 8000,
-        booking: booking(n, o.booking), payout: { account: ON_FILE, url: 'https://pay-s04.mega.dev/payouts', ...o.payout },
+        booking: booking(n, o.booking), payout: { account: ON_FILE, url: 'https://pay-s04.mega.dev/looks-good-to-me/payouts', ...o.payout },
         task: token(batch, n), next: 'Pay this booking at the payout API, then send its answer and the payout receipt here.',
       };
     },
@@ -74,6 +77,12 @@ export async function startFake() {
         if (f.verifyReply) return json(200, f.verifyReply);
         return json(200, { status: 'ok', message: 'The payout key works.' });
       }
+      if (req.method === 'GET' && req.url === '/settings') {
+        if (!/^Bearer att_SECRET_attempt_\d+_zz$/.test(auth)) return json(401, { error: 'Send the attempt as a Bearer token.' });
+        const s = f.settings[Math.min(f.settingsReads++, f.settings.length - 1)];
+        if (s.code) return json(s.code, s.body);
+        return json(200, { ...s, next: 'Use these settings for this attempt.' });
+      }
       if (req.url === '/payouts') {
         if (f.payoutDelayMs) await new Promise((r) => setTimeout(r, f.payoutDelayMs));
         const wait = f.payoutDelayFor?.[nOf(b.task)];
@@ -100,7 +109,7 @@ export async function startFake() {
       if (req.url === '/parked' && req.method === 'GET') {
         f.parkedReads++;
         for (const [n, d] of Object.entries(f.decideAfter)) if (f.parkedReads > d.reads && f.parked.has(Number(n))) f.parked.set(Number(n), d.decision);
-        const list = [...f.parked].map(([n, decision]) => ({ n, decision }));
+        const list = [...f.parked].map(([n, decision]) => (decision && typeof decision === 'object' ? { n, ...decision } : { n, decision }));
         return json(200, { parked: f.dupEntries ? [...list, ...list] : list });
       }
       if (req.url === '/parked' && req.method === 'POST') return json(200, { status: 'ok', n: nOf(b.task) });

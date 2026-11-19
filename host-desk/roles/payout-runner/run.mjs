@@ -18,14 +18,15 @@ import { state } from './lib/flow.mjs';
 import { STATE_FILE } from './extensions/vars.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const MANUAL = 'https://hq.mega.dev/challenges/twenty-payouts/manual';
+const COURSE = 'https://hq.mega.dev/challenges/looks-good-to-me'; // S04E02 (logs/s04e02/api-index.txt)
+const MANUAL = `${COURSE}/manual`;
 // Only the lab points the scripts elsewhere; a stray value in the shell never redirects a real run.
 if (process.env.MODE !== 'lab') for (const k of ['API_BASE', 'PAYOUTS_URL', 'VERIFY_BASE', 'VARS_FILE', 'STATE_FILE', 'JOURNAL_DIR']) delete process.env[k];
 let role;
 if (process.env.READ_ONLY === '1') {
   role = 'ROLE.slice1.md';
   process.env.ALLOWED_HOSTS ||= 'hq.mega.dev';
-  process.env.MANUAL_URL ||= 'https://hq.mega.dev/challenges/twenty-payouts/api';
+  process.env.MANUAL_URL ||= `${COURSE}/api`;
 } else if (process.env.MODE === 'practice') {
   role = 'ROLE.practice.md';
   process.env.ALLOWED_HOSTS = 'hq.mega.dev,pay-s04.mega.dev';
@@ -57,7 +58,7 @@ if (process.env.READ_ONLY === '1') {
   }
   mkdirSync(out, { recursive: true });
   role = join(out, 'ROLE.md');
-  writeFileSync(role, readFileSync(join(here, 'ROLE.md'), 'utf8').split('https://hq.mega.dev/challenges/twenty-payouts').join(lab));
+  writeFileSync(role, readFileSync(join(here, 'ROLE.md'), 'utf8').split(COURSE).join(lab));
   Object.assign(process.env, {
     ALLOWED_HOSTS: 'localhost', API_BASE: lab, PAYOUTS_URL: `${lab}/payouts`, VERIFY_BASE: `${lab}/verify`, MANUAL_URL: `${lab}/manual`, MANUAL_ONCE: '1', ALLOW_RUN: '1',
     VARS_FILE: join(here, '../../../lab/vars.lab.json'), STATE_FILE: join(out, 'state', 'vars.json'), LOG_DIR: join(out, 'logs'), JOURNAL_DIR: join(out, 'journal'),
@@ -68,6 +69,8 @@ if (process.env.READ_ONLY === '1') {
   console.error('Run with READ_ONLY=1 (slice 1), MODE=practice, or MODE=run with ALLOW_RUN=1 (the real batch).');
   process.exit(2);
 }
+// the code tool runs scripts with this Node, never with process.execPath inside Pi (extensions/code.mjs nodeBin)
+process.env.HOST_NODE = process.execPath;
 process.env.RUN_ID ||= new Date().toISOString().replace(/[:.]/g, '-');
 const args = [
   '-p',

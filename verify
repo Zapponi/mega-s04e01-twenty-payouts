@@ -4,6 +4,10 @@
 //   ./verify --slice 1  unit tests + slice 1 checks (latest run in logs/)
 //   ./verify --all      must checks + keep checks K1–K2
 //   ./verify --lab [lab/out/<run>]  unit tests + the lab checks of lab/EXPECTED.md (latest finished lab run)
+//   ./verify --lab-reviewer [lab/out/reviewer-<run>]  S04E02: every reviewer case of lab/CASES.md + R1, R2, S1 (latest run)
+//   ./verify --adherence  S04E02: each official sentence F1–F22 of lab/CASES.md, PASS / FAIL / PENDING
+//   ./verify --slice 1    S04E02 slice 1: R3 on the real /review reply, R00b, S1 on the real logs
+//   ./verify --s04e01-slice1  the S04E01 slice 1 checks (read-only manual run)
 // It reads the request log, the run log, the saved manual and (later) the API state; never the agent's report on
 // itself. It reads vars.json only to search for leaked values, and never prints a value.
 import { spawnSync } from 'node:child_process';
@@ -17,17 +21,21 @@ const LOGS = join(ROOT, 'logs');
 const DEFAULT_MANUAL_URL = 'https://hq.mega.dev/challenges/twenty-payouts/api';
 const args = process.argv.slice(2);
 const slice = args.includes('--slice') ? args[args.indexOf('--slice') + 1] : null;
+const REVIEWER_OUT = join(ROOT, 'lab/out');
 const all = args.includes('--all');
 
 const results = [];
+const unitPassed = new Set(); // names of the passing unit tests (TAP), for the lab cases shown by a unit test
 const check = (id, ok, detail) => results.push({ id, ok, detail });
 
 function unitTests() {
-  const dir = join(ROOT, 'host-desk/roles/payout-runner/test');
-  const files = readdirSync(dir).filter((f) => f.endsWith('.test.mjs')).map((f) => join(dir, f));
-  const r = spawnSync(process.execPath, ['--test', ...files], { encoding: 'utf8' });
-  const pass = /# pass (\d+)/.exec(r.stdout)?.[1] ?? '0';
-  const fail = /# fail (\d+)/.exec(r.stdout)?.[1] ?? '?';
+  const dirs = ['host-desk/roles/payout-runner/test', 'host-desk/roles/reviewer/test'].map((d) => join(ROOT, d)).filter(existsSync);
+  const dir = join(ROOT, 'host-desk/roles');
+  const files = dirs.flatMap((d) => readdirSync(d).filter((f) => f.endsWith('.test.mjs')).map((f) => join(d, f)));
+  const r = spawnSync(process.execPath, ['--test', '--test-reporter=tap', ...files], { encoding: 'utf8' });
+  for (const m of r.stdout.matchAll(/^ok \d+ - (.+?)(?: # .*)?$/gm)) unitPassed.add(m[1].replace(/\\#/g, '#'));
+  const pass = /(?:#|ℹ) pass (\d+)/.exec(r.stdout)?.[1] ?? '0';
+  const fail = /(?:#|ℹ) fail (\d+)/.exec(r.stdout)?.[1] ?? '?';
   const failing = [...r.stdout.matchAll(/^not ok \d+ - (.+)$/gm)].map((m) => m[1]);
   check('unit', r.status === 0, `unit tests: ${pass} pass, ${fail} fail (node --test ${relative(ROOT, dir)}/)${failing.length ? `; failing: ${failing.join(' | ')}` : ''}`);
 }
@@ -41,6 +49,10 @@ function secretValues() {
   } catch {
     return null;
   }
+  try {
+    const tok = readFileSync(join(process.env.HOME ?? '', '.pi/agent/anthropic-oauth-token'), 'utf8').trim();
+    if (tok.length >= 8) out.push(['MODEL_TOKEN', tok]);
+  } catch {}
   try {
     const st = JSON.parse(readFileSync(STATE, 'utf8'));
     out.push(...Object.entries(st).filter(([k, v]) => /^(ATTEMPT|VERIFY_PATH|CUR_TASK|TASK_[A-Z]+_\d+)(_PREV_\d+)?$/.test(k) && typeof v === 'string' && v.length >= 4));
@@ -64,7 +76,7 @@ function m5() {
   if (!vals || vals.length === 0) return check('M5', false, 'cannot read the secret values from host-desk/vars.json to search for them');
   const git = spawnSync('git', ['ls-files', '-co', '--exclude-standard', '-z'], { cwd: ROOT, encoding: 'utf8' });
   if (git.status !== 0) return check('M5', false, 'git ls-files failed; cannot list the repo tree');
-  const files = new Set([...git.stdout.split('\0').filter(Boolean).map((f) => join(ROOT, f)), ...walk(LOGS), ...walk(join(ROOT, 'journal'))]);
+  const files = new Set([...git.stdout.split('\0').filter(Boolean).map((f) => join(ROOT, f)), ...walk(LOGS), ...walk(join(ROOT, 'journal')), ...walk(REVIEWER_OUT)]);
   files.delete(join(ROOT, 'host-desk/vars.json'));
   files.delete(STATE);
   const hits = [];
@@ -137,12 +149,26 @@ function mustChecks() {
 }
 
 // --lab [dir]: the lab checks (proof/lab.mjs, lab/EXPECTED.md) on one lab run, the latest under lab/out/ by default.
-async function labRun() {
+/** The latest finished batch lab run (not a reviewer run), or the one given; `agent` narrows it ('dry', 'model'). */
+function batchRun(given, agent) {
   const outDir = join(ROOT, 'lab/out');
-  const given = args[args.indexOf('--lab') + 1];
-  const runs = existsSync(outDir) ? readdirSync(outDir).filter((d) => existsSync(join(outDir, d, 'truth.jsonl')) && existsSync(join(outDir, d, 'done.json'))).sort() : [];
-  const dir = given && !given.startsWith('--') ? join(ROOT, given) : runs.length ? join(outDir, runs.at(-1)) : null;
+  const runs = existsSync(outDir) ? readdirSync(outDir).filter((d) => !d.startsWith('reviewer-') && existsSync(join(outDir, d, 'truth.jsonl')) && existsSync(join(outDir, d, 'done.json')) && (!agent || d.endsWith(`-${agent}`))).sort() : [];
+  return given && !given.startsWith('--') ? join(ROOT, given) : runs.length ? join(outDir, runs.at(-1)) : null;
+}
+
+async function labRun() {
+  const dir = batchRun(args[args.indexOf('--lab') + 1]);
   if (!dir || !existsSync(join(dir, 'truth.jsonl'))) return check('lab', false, 'no finished lab run under lab/out/: run node lab/run-lab.mjs first');
+  const { lab } = await batchLab(dir);
+  console.log(`lab run: ${relative(ROOT, dir)}`);
+  for (const r of lab) check(r.id, r.ok, r.detail);
+  // S04E02: every batch case of lab/CASES.md (B01–B28), from those checks and the unit tests
+  const { batchCases } = await import('./proof/lab.mjs');
+  for (const [id, r] of batchCases(lab, unitPassed)) check(`case ${id}`, r.ok, r.detail);
+}
+
+/** The lab checks of one batch lab run. */
+async function batchLab(dir) {
   const { labChecks } = await import('./proof/lab.mjs');
   const { scenario, LAB_VARS } = await import('./lab/mock-api.mjs');
   const texts = [...walk(join(dir, 'logs')), ...walk(join(dir, 'journal')), ...walk(join(dir, 'agent'))].map((f) => ({ name: relative(ROOT, f), text: readFileSync(f, 'utf8') }));
@@ -155,18 +181,119 @@ async function labRun() {
   try {
     kill = JSON.parse(readFileSync(join(dir, 'kill.json'), 'utf8'));
   } catch {}
-  console.log(`lab run: ${relative(ROOT, dir)}`);
-  for (const r of labChecks({ truth: readJsonl(join(dir, 'truth.jsonl')), scenario: scenario(), journal: readJsonl(join(dir, 'journal/journal.jsonl')), texts, secrets, kill })) check(r.id, r.ok, r.detail);
+  return { lab: labChecks({ truth: readJsonl(join(dir, 'truth.jsonl')), scenario: scenario(), journal: readJsonl(join(dir, 'journal/journal.jsonl')), texts, secrets, kill }) };
 }
 
-unitTests();
+// The latest finished reviewer lab run, or the one named after --lab-reviewer; `agent` narrows it (e.g. 'model').
+function reviewerRun(given, agent) {
+  const runs = existsSync(REVIEWER_OUT) ? readdirSync(REVIEWER_OUT).filter((d) => d.startsWith('reviewer-') && existsSync(join(REVIEWER_OUT, d, 'done.json')) && (!agent || d.endsWith(`-${agent}`))).sort() : [];
+  if (given && !given.startsWith('--')) return join(ROOT, given);
+  return runs.length ? join(REVIEWER_OUT, runs.at(-1)) : null;
+}
+
+async function reviewerCases(dir) {
+  const { reviewerLab } = await import('./proof/reviewer-lab.mjs');
+  const { SCENARIOS } = await import('./lab/reviewer/scenarios.mjs');
+  const { LAB_VARS } = await import('./lab/reviewer/mock.mjs');
+  return reviewerLab({ root: ROOT, dir, scenarios: SCENARIOS, labVars: LAB_VARS });
+}
+
+async function labReviewer() {
+  const dir = reviewerRun(args[args.indexOf('--lab-reviewer') + 1]);
+  if (!dir) return check('lab-reviewer', false, 'no finished reviewer lab run: node lab/reviewer/run-lab.mjs --agent dry-right');
+  const { cases, rollups, agent } = await reviewerCases(dir);
+  console.log(`reviewer lab run: ${relative(ROOT, dir)} (agent ${agent})`);
+  for (const [id, r] of [...cases].sort(([a], [b]) => a.localeCompare(b, 'en', { numeric: true }))) check(`case ${id}`, r.ok, r.detail);
+  for (const r of rollups) check(r.id, r.ok, r.detail);
+}
+
+// R3 on the real course: the saved reply of the improved reviewer's one POST /review (plan.md § 3), saved by
+// lab/reviewer/save-review.mjs as logs/s04e02/review-real-*.json { status, body, attempt: <masked>, hunks }.
+async function r3Real() {
+  const { accepted } = await import('./proof/reviewer-lab.mjs');
+  const d = join(LOGS, 's04e02');
+  const files = existsSync(d) ? readdirSync(d).filter((f) => /^review-real-.+\.json$/.test(f)).sort() : [];
+  if (!files.length) return { ok: false, detail: 'no real review of the improved reviewer saved yet (plan.md § 3)', pending: true };
+  const r = JSON.parse(readFileSync(join(d, files.at(-1)), 'utf8'));
+  const ok = accepted(r.status, r.body) && r.unexpired === true && r.sameHunks === true && !r.uncertain;
+  return { ok, detail: `${files.at(-1)}: ${r.status} ${JSON.stringify(r.body).slice(0, 200)}; unexpired ${r.unexpired}; hunks = patch ${r.sameHunks}` };
+}
+
+// The reviewer's must checks in the default run too (BRIEF.md "Proof": ./verify exits 0 only when every must check
+// passes; Sol whole-diff A #4): R1 on the two latest model lab runs, R2 on the latest, R3 on the real course.
+async function reviewerMust() {
+  const runs = existsSync(REVIEWER_OUT) ? readdirSync(REVIEWER_OUT).filter((d) => /^reviewer-.+-model$/.test(d) && existsSync(join(REVIEWER_OUT, d, 'done.json'))).sort().slice(-2) : [];
+  const roll = [];
+  for (const d of runs) roll.push({ d, r: (await reviewerCases(join(REVIEWER_OUT, d))).rollups });
+  const of = (x, id) => x.r.find((y) => y.id === id) ?? { ok: false, detail: `no ${id} in the run` };
+  check('R1', roll.length === 2 && roll.every((x) => of(x, 'R1').ok), roll.length === 2 ? roll.map((x) => `${x.d}: ${of(x, 'R1').detail}`).join('; ') : `${roll.length} model lab run(s) of the reviewer; two in a row needed`);
+  check('R2', roll.length > 0 && of(roll.at(-1), 'R2').ok, roll.length ? `${roll.at(-1).d}: ${of(roll.at(-1), 'R2').detail}` : 'no model lab run of the reviewer');
+  const r3 = await r3Real();
+  check('R3', r3.ok, r3.detail);
+}
+
+async function sliceOne() {
+  const { givenFirst } = await import('./proof/reviewer-lab.mjs');
+  const g = givenFirst(ROOT);
+  check('R00b', g.ok, g.detail);
+  const r3 = await r3Real();
+  check('R3', r3.ok, r3.detail);
+  m5();
+}
+
+async function adherenceReport() {
+  const { adherence } = await import('./proof/adherence.mjs');
+  const { givenFirst, improved } = await import('./proof/reviewer-lab.mjs');
+  const results = new Map();
+  const model = reviewerRun(null, 'model');
+  const dry = reviewerRun(null, 'dry-right');
+  const dir = model ?? dry;
+  if (dir) {
+    const { cases } = await reviewerCases(dir);
+    for (const [id, r] of cases) results.set(id, { ...r, from: model ? 'model lab' : 'dry lab only' });
+  }
+  if (results.has('R00c')) results.set('R00c', { ...results.get('R00c'), from: 'static check of run.mjs' });
+  const g = givenFirst(ROOT);
+  results.set('R00b', { ...g, from: 'real logs + git' });
+  const imp = improved(ROOT);
+  const r01 = model ? results.get('R01') : null;
+  results.set('R00d', { ok: imp.ok && !!r01?.ok, detail: imp.detail, from: model ? 'model lab' : 'no model run yet' });
+  if (!model) results.delete('R00d');
+  const r3 = await r3Real();
+  if (!r3.pending) results.set('R3real', { ...r3, from: 'real course' });
+  // batch cases: the latest model lab run of the batch, else the latest dry one (a dry result stays PENDING). The
+  // cases a unit test shows need the unit run, so --adherence runs the unit tests when a batch lab run exists.
+  const bModel = batchRun(null, 'model');
+  const bDir = bModel ?? batchRun(null, 'dry');
+  if (bDir) {
+    unitTests();
+    const { batchCases } = await import('./proof/lab.mjs');
+    const { lab } = await batchLab(bDir);
+    for (const [id, r] of batchCases(lab, unitPassed)) results.set(id, { ...r, from: bModel ? 'model lab' : 'dry lab only' });
+    console.log(`batch cases from ${relative(ROOT, bDir)}`);
+  }
+  const a = adherence(ROOT, results);
+  console.log(`adherence to the official statement (lab/CASES.md), reviewer cases from ${dir ? relative(ROOT, dir) : 'no lab run'}:`);
+  for (const r of a.rows) console.log(`${r.status.padEnd(7)} ${r.id}: ${r.text.slice(0, 90)}\n         ${r.detail}`);
+  console.log(`\n${a.pass}/${a.total} sentences PASS, ${a.fail} FAIL, ${a.pending} PENDING`);
+  check('adherence', a.pass === a.total, `${a.pass}/${a.total} PASS, ${a.fail} FAIL, ${a.pending} PENDING`);
+}
+
+if (!args.includes('--adherence')) unitTests();
 if (args.includes('--lab')) {
   await labRun();
-} else if (slice === '1') {
+} else if (args.includes('--lab-reviewer')) {
+  await labReviewer();
+} else if (args.includes('--adherence')) {
+  await adherenceReport();
+} else if (args.includes('--s04e01-slice1')) {
   slice1();
   m5();
+} else if (slice === '1') {
+  await sliceOne();
 } else {
   for (const r of mustChecks()) check(r.id, r.ok, r.detail);
+  await reviewerMust();
   m5();
   if (all) for (const id of ['K1', 'K2']) check(id, false, 'not built yet');
 }

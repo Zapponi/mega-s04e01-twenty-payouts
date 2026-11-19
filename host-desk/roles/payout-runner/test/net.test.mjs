@@ -2,7 +2,7 @@
 // Run: node --test host-desk/roles/payout-runner/test/
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtempSync, readFileSync, readdirSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, writeFileSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -165,7 +165,7 @@ test('a host outside the allowlist is refused and never sent', async () => {
 
 test('https is required outside localhost', async () => {
   process.env.ALLOWED_HOSTS = 'hq.mega.dev';
-  const r = await send({ url: 'http://hq.mega.dev/challenges/twenty-payouts/api' });
+  const r = await send({ url: 'http://hq.mega.dev/challenges/looks-good-to-me/api' });
   assert.match(r.refused, /https/);
 });
 
@@ -290,4 +290,50 @@ test('secrets a script names in a reply are saved and masked before the log', as
   assert.ok(!r.body.includes('tsk_SECRET_abcdef'), 'reply holds the token');
   assert.ok(!logText().includes('tsk_SECRET_abcdef'), 'log holds the token');
   assert.match(r.body, /\{\{TASK_1\}\}/);
+});
+
+test('code tool: scripts run with a Node binary, never with the pi binary (lab 2026-11-19)', async () => {
+  const { nodeBin } = await import('../extensions/code.mjs');
+  assert.equal(nodeBin({}, '/nix/store/x-pi-1.5.2/libexec/pi/pi'), null, 'process.execPath inside a compiled Pi is pi itself');
+  // real files: the guard reads where a link named node really points (Sol whole-diff B #2)
+  const bin = mkdtempSync(join(tmpdir(), 'nodebin-'));
+  mkdirSync(join(bin, 'real'));
+  mkdirSync(join(bin, 'fake'));
+  writeFileSync(join(bin, 'real', 'node'), '');
+  writeFileSync(join(bin, 'fake', 'pi'), '');
+  symlinkSync(join(bin, 'fake', 'pi'), join(bin, 'fake', 'node'));
+  assert.equal(nodeBin({ HOST_NODE: join(bin, 'real', 'node') }, '/nix/store/x-pi-1.5.2/libexec/pi/pi'), join(bin, 'real', 'node'));
+  assert.equal(nodeBin({}, join(bin, 'real', 'node')), join(bin, 'real', 'node'));
+  assert.equal(nodeBin({ HOST_NODE: join(bin, 'fake', 'node') }, '/x/pi'), null, 'a link named node that points to pi is refused');
+  assert.equal(nodeBin({ HOST_NODE: '/nonexistent/node' }, '/x/pi'), null, 'a missing file is refused');
+  assert.equal(nodeBin({}, process.execPath), process.execPath, 'the Node that runs this test passes');
+  rmSync(bin, { recursive: true, force: true });
+  assert.equal(nodeBin({ HOST_NODE: 'node' }, '/x/pi'), null, 'a relative name is not trusted');
+  assert.equal(nodeBin({ HOST_NODE: '/x/pi' }, '/usr/bin/node'), null, 'HOST_NODE must itself be node');
+  const r = await import('../../reviewer/extensions/code.mjs');
+  assert.equal(r.nodeBin({}, '/nix/store/x-pi-1.5.2/libexec/pi/pi'), null, 'the reviewer has the same guard');
+});
+
+test('fromManual takes the whole verify path, every segment (S04E02 real batch: only "looks-good-to-me" was taken)', async () => {
+  const { fromManual } = await import('../lib/net.mjs');
+  const raw = JSON.stringify({ manual: '- Before a run, check the payout key: GET https://verify-s04.mega.dev/looks-good-to-me/AbC_123-xyzTOKENtoken456 with the header X-Payout-Key: {{PAYOUT_KEY}}.\n- The account on file is acct_1234567890.' });
+  assert.deepEqual(fromManual(raw), { ACCOUNT_ON_FILE: 'acct_1234567890', VERIFY_PATH: 'looks-good-to-me/AbC_123-xyzTOKENtoken456' });
+  assert.equal(fromManual(JSON.stringify({ manual: 'GET https://verify-s04.mega.dev/short' })).VERIFY_PATH, undefined, 'a short path is no secret to mask');
+});
+
+test('a refusal for a host that holds a secret is masked in the reply and the log (Sol whole-diff B #3)', async () => {
+  const key = ['PAYOUT_KEY', 'pkhostsafe0987654321'];
+  const r = await send({ method: 'GET', url: `https://{{${key[0]}}}.elsewhere.example/x` }, { vars: { PAYOUT_KEY: key[1] } });
+  assert.ok(r.refused, 'refused');
+  assert.ok(!r.refused.includes(key[1]), 'the reason holds the secret');
+  assert.ok(!logText().includes(key[1]), 'the log holds the secret');
+});
+
+test('code tool: a refused file name that holds a secret is masked in the reply and in code.jsonl (Sol re-review B #3)', async () => {
+  const r = await tools.code.execute('1', { file: `../${FAKE.TICKET}.mjs` });
+  const text = r.content[0].text;
+  assert.match(text, /No such file/);
+  assert.ok(!text.includes(FAKE.TICKET), 'the reply holds the ticket');
+  const log = readFileSync(join(process.env.LOG_DIR, 'code.jsonl'), 'utf8');
+  assert.ok(!log.includes(FAKE.TICKET), 'code.jsonl holds the ticket');
 });

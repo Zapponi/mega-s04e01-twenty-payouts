@@ -9,8 +9,9 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { STATE_FILE } from '../extensions/vars.mjs';
 
-export const API = 'https://hq.mega.dev/challenges/twenty-payouts';
-export const PAYOUTS = 'https://pay-s04.mega.dev/payouts';
+// S04E02 (logs/s04e02/api-index.txt): the course base and the payout endpoint of "Looks good to me".
+export const API = 'https://hq.mega.dev/challenges/looks-good-to-me';
+export const PAYOUTS = 'https://pay-s04.mega.dev/looks-good-to-me/payouts';
 export const batchUrl = (batch) => `${process.env.API_BASE || API}/${batch}`;
 export const payoutsUrl = () => process.env.PAYOUTS_URL || PAYOUTS;
 
@@ -23,6 +24,7 @@ export function state() {
 }
 
 export const parkedUrl = () => `${process.env.API_BASE || API}/parked`;
+export const settingsUrl = () => `${process.env.API_BASE || API}/settings`;
 export const verifyUrl = () => `${process.env.VERIFY_BASE || 'https://verify-s04.mega.dev'}/{{VERIFY_PATH}}`;
 
 const currentFile = (batch) => join(dirname(STATE_FILE()), `current-${batch}.json`);
@@ -79,7 +81,10 @@ export function refusalOf(r) {
   try {
     b = JSON.parse(r.body);
   } catch {}
-  const need = b && typeof b === 'object' ? b.need : undefined;
+  // a refusal may name its need only in a pointer: "check-lane has a need for this: routine-script." (S04E01 real
+  // run, KEEP.md); the need is taken from there, so the journal and the harness still see it (Sol review #22 B4)
+  const fromPointer = typeof b?.pointer === 'string' ? /need for this:\s*([a-z0-9][a-z0-9-]*)/i.exec(b.pointer)?.[1] : undefined;
+  const need = b && typeof b === 'object' ? b.need ?? fromPointer : undefined;
   const st = b && typeof b === 'object' ? String(b.status ?? '') : '';
   // 408, 425 and 429 say "not now", not "no": they are not a refusal (the answer may be retried).
   const retryable = [408, 425, 429].includes(r.status);

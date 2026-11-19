@@ -56,8 +56,8 @@ export function config(env = process.env) {
     runId: env.RUN_ID ?? '',
     // Where each secret may go (check-lane payout-run, 2026-11-17: "A document's request never sends a secret to a new
     // host"). Fixed here and in run.mjs, never from a manual or a reply: only the human changes it.
-    apiBase: env.API_BASE || 'https://hq.mega.dev/challenges/twenty-payouts',
-    payoutsUrl: env.PAYOUTS_URL || 'https://pay-s04.mega.dev/payouts',
+    apiBase: env.API_BASE || 'https://hq.mega.dev/challenges/looks-good-to-me',
+    payoutsUrl: env.PAYOUTS_URL || 'https://pay-s04.mega.dev/looks-good-to-me/payouts',
   };
 }
 
@@ -230,11 +230,12 @@ export function fromManual(rawText) {
   const out = {};
   const acct = /account on file is (acct_[A-Za-z0-9]+)/i.exec(text)?.[1];
   if (acct) out.ACCOUNT_ON_FILE = acct;
-  const path = /https:\/\/verify-s04\.mega\.dev\/([A-Za-z0-9_-]{8,})/.exec(text)?.[1];
-  if (path) out.VERIFY_PATH = path;
+  // the whole path, every segment (S04E02: "verify-s04.mega.dev/looks-good-to-me/<token>"; taking only the first segment
+  // masked every "looks-good-to-me" as {{VERIFY_PATH}} and left the token in the clear, real batch 2026-11-19)
+  const path = /https:\/\/verify-s04\.mega\.dev\/([A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*)/.exec(text)?.[1];
+  if (path && path.length >= 16) out.VERIFY_PATH = path;
   return out;
 }
-
 /**
  * Writes run-time secrets into the state file, before anything is logged, so they are masked as {{NAME}}. A name that
  * already holds another value keeps the old one as <NAME>_PREV_<n>, so old logs stay masked.
@@ -282,8 +283,10 @@ export async function send({ method = 'GET', url, headers = {}, body, caller = '
     // every hop: a redirect never carries a secret past its scope either
     const why = refusal({ method, url: target, caller }, cfg) ?? scopeRefusal(target, `${target}\n${JSON.stringify(h)}\n${payload ?? ''}`, vars, cfg);
     if (why) {
-      log(cfg, { ...base, hop, url: mask(target, vars), refused: why });
-      return { ok: false, refused: why, url: mask(target, vars), body: '' };
+      // the reason names the host and may hold a secret placed there by a redirect (Sol whole-diff B #3)
+      const shown = mask(why, vars);
+      log(cfg, { ...base, hop, url: mask(target, vars), refused: shown });
+      return { ok: false, refused: shown, url: mask(target, vars), body: '' };
     }
     let res;
     try {

@@ -2,14 +2,41 @@
 // printed. The values in vars.json reach the script as environment variables (PAYOUT_KEY, …), the rest of the
 // environment does not; the model sees only the script's output.
 import { spawn } from 'node:child_process';
-import { existsSync, realpathSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, realpathSync } from 'node:fs';
 import * as nodePath from 'node:path';
 import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadVars } from './vars.mjs';
-import { mask } from '../lib/net.mjs';
+import { config, mask } from '../lib/net.mjs';
+
+/** One line per code call in <LOG_DIR>/code.jsonl (masked): what the model ran and what it saw (lab run 2026-11-19: the
+ * model reported outputs nobody could check). */
+function logCall(record) {
+  try {
+    const dir = config().logDir;
+    mkdirSync(dir, { recursive: true });
+    // the whole line is masked, every field (Sol whole-diff re-review B #3)
+    appendFileSync(join(dir, 'code.jsonl'), `${mask(JSON.stringify({ time: new Date().toISOString(), run: process.env.RUN_ID ?? '', ...record }))}\n`);
+  } catch {}
+}
 
 const SCRIPTS = join(dirname(dirname(fileURLToPath(import.meta.url))), 'scripts');
+// The Node that runs a script: never process.execPath alone. In a compiled Pi (Pi 1.5.2 from nix is one binary)
+// process.execPath is the pi binary itself, and "pi <file> <args>" starts a whole new agent session with every
+// built-in tool and the default model: lab run 2026-11-19, 55 hidden Opus sessions ran in place of the scripts.
+// run.mjs (plain Node) passes its own path as HOST_NODE; anything not named node is refused.
+export function nodeBin(env = process.env, execPath = process.execPath) {
+  const c = env.HOST_NODE || execPath;
+  const isNode = (f) => /^node(\.exe)?$/i.test(nodePath.basename(f));
+  if (typeof c !== 'string' || !nodePath.isAbsolute(c) || !isNode(c)) return null;
+  // the file a link named node points to must be named node too (a link to pi is refused; Sol whole-diff B #2)
+  try {
+    return isNode(realpathSync(c)) ? c : null;
+  } catch {
+    return null;
+  }
+}
+
 const TIMEOUT_MS = 120_000;
 const MAX_OUT = 20_000;
 
@@ -67,13 +94,20 @@ export default function (pi) {
     },
     async execute(_id, p, signal) {
       const file = script(p.file);
+      const t0 = Date.now();
       if (!file) {
-        return { content: [{ type: 'text', text: `No such file in scripts/: ${p.file}` }], details: { failed: true } };
+        logCall({ file: String(p.file).slice(0, 100), args: (p.args ?? []).map((a) => mask(String(a)).slice(0, 200)), refused: 'no such file' });
+        return { content: [{ type: 'text', text: mask(`No such file in scripts/: ${p.file}`) }], details: { failed: true } };
+      }
+      const node = nodeBin();
+      if (!node) {
+        return { content: [{ type: 'text', text: 'Cannot run scripts: no Node binary (HOST_NODE). Start the role with run.mjs. Nothing was run.' }], details: { failed: true } };
       }
       const out = await new Promise((done) => {
-        const child = spawn(process.execPath, [file, ...(p.args ?? [])], {
+        const child = spawn(node, [file, ...(p.args ?? [])], {
           cwd: SCRIPTS,
-          env: { ...basics(), ...net(), ...loadVars() },
+          // another role's attempt (ATTEMPT_PREV_*) never reaches a script (Sol whole-diff B #2)
+          env: { ...basics(), ...net(), ...Object.fromEntries(Object.entries(loadVars()).filter(([k]) => !k.startsWith('ATTEMPT_PREV_'))) },
           stdio: ['ignore', 'pipe', 'pipe'],
           signal,
           timeout: TIMEOUT_MS,
@@ -81,10 +115,14 @@ export default function (pi) {
         let text = '';
         child.stdout.on('data', (d) => (text += d));
         child.stderr.on('data', (d) => (text += d));
-        child.on('error', (e) => done(`could not run: ${mask(e.message)}`));
+        child.on('error', (e) => {
+          logCall({ file: p.file, args: (p.args ?? []).map((a) => mask(String(a)).slice(0, 200)), error: mask(e.message), aborted: !!signal?.aborted, ms: Date.now() - t0 });
+          done(`could not run: ${mask(e.message)}`);
+        });
         // Masked before the model sees it (plan.md § 0): a script that prints a secret by mistake shows {{NAME}}.
-        child.on('close', (code) => {
+        child.on('close', (code, sig) => {
           const shown = mask(text);
+          logCall({ file: p.file, args: (p.args ?? []).map((a) => mask(String(a)).slice(0, 200)), exit: code, signal: sig, aborted: !!signal?.aborted, ms: Date.now() - t0, out: shown.slice(0, MAX_OUT) });
           done(`exit ${code}\n${shown.length > MAX_OUT ? `${shown.slice(0, MAX_OUT)}\n…(cut)` : shown}`);
         });
       });

@@ -12,7 +12,8 @@
 // It prints one line per task and a summary; every request is in the request log, every step in the journal.
 import { amountOf, claim, events, journal, oddFields, release, statusOf, targetOf } from '../lib/batch.mjs';
 import { batchArg, batchUrl, captureTask, current, payoutsUrl, refusalOf, saveCurrent, show, state, taskOf, taskVar } from '../lib/flow.mjs';
-import { send } from '../lib/net.mjs';
+import { attemptOpenUntil, send } from '../lib/net.mjs';
+import { readSettings, settingsOf } from '../lib/settings.mjs';
 
 const TIMEOUT_MS = Number(process.env.SETTLE_TIMEOUT_MS || 4000);
 const batch = batchArg(process.argv[2]);
@@ -69,10 +70,12 @@ function pointerOf(r) {
   }
 }
 
-// Pace guard (Sol review C, 2026-11-17): the real run gave 6000 ms for all 20 tasks (KEEP.md). Before opening the run,
+// Pace guard (Sol review C, 2026-11-17): the S04E01 real run gave 6000 ms for all 20 tasks (KEEP.md). S04E02 shows its
+// limit only in the first run task, so before the open 6000 ms is the one evidence there is (RUN_BUDGET_MS changes it).
+// Before opening the run,
 // the practice of this attempt, run by this routine, shows what one task costs on the real hosts (payout + answer). If
 // 20 of them would not fit with a margin, the run is not opened: a refused run cannot be taken back.
-const RUN_BUDGET_MS = Number(process.env.RUN_BUDGET_MS || 6000); // runLimitMs of the real run, 2026-11-17
+const RUN_BUDGET_MS = Number(process.env.RUN_BUDGET_MS || 6000); // runLimitMs of the S04E01 real run, 2026-11-17
 const MARGIN = 0.85; // keep 15% of the budget free: the agent's own pick, said so
 if (batch === 'run' && !events().some((e) => e.event === 'opened' && e.batch === 'run' && e.attempt === st.ATTEMPT_SEEN_AT)) {
   const ev = events();
@@ -96,13 +99,21 @@ if (opened) {
   task = current(batch);
   out(`The ${batch} is already open for this attempt: picking up at ${task?.status === 'task' ? `task ${task.n}` : `reply "${task?.status}"`}.`);
 } else {
+  // Before an open nothing is sent yet: the attempt must have time left, and this attempt's settings must be read
+  // (S04E02: the commission changes per attempt; plan.md § 4 "setup reads before POST /run").
+  const left = attemptOpenUntil(st) - Date.now();
+  const MIN_LEFT_MS = Number(process.env.MIN_ATTEMPT_LEFT_MS || 10 * 60_000);
+  if (left < MIN_LEFT_MS) stop(`the attempt has ${Math.max(0, Math.round(left / 60_000))} min left (under ${MIN_LEFT_MS / 60_000}); the ${batch} was NOT opened. Tell the human.`, 6);
+  const set = await readSettings(st);
+  if (!set.ok) stop(`${set.why}. The ${batch} was NOT opened${set.need ? `; need: ${set.need}. The harness calls check-lane with the need` : ''}. Tell the human.`, set.need ? 5 : 3);
+  out(`SETTINGS ${set.version}: commission ${set.commissionPct} %.`);
   if (!claim(`open:${batch}:${st.ATTEMPT_SEEN_AT}`, 'open')) stop(`the ${batch} open failed or is unclear for this attempt; never sent twice. Tell the human.`);
   journal({ event: 'opening', batch, attempt: st.ATTEMPT_SEEN_AT });
   const r = await send({ method: 'POST', url: batchUrl(batch), body: { attempt: '{{ATTEMPT}}' }, signal: signal() }, { capture: captureTask(batch), keep });
   const ref = r.status ? refusalOf(r) : null;
   if (ref) {
-    journal({ event: 'open_refused', batch, attempt: st.ATTEMPT_SEEN_AT, need: ref.need, why: ref.why, http: r.status });
-    stop(`REFUSED opening the ${batch}: ${ref.why}${ref.need ? `; need: ${ref.need}` : ''}`, 5);
+    journal({ event: 'open_refused', batch, attempt: st.ATTEMPT_SEEN_AT, need: ref.need, why: ref.why, http: r.status, pointer: pointerOf(r) });
+    stop(`REFUSED opening the ${batch}: ${ref.why}${ref.need ? `; need: ${ref.need}` : ''}${pointerOf(r) ? `; ${pointerOf(r)}` : ''}. Never retried. The harness calls check-lane with the need.`, 5);
   }
   if (!(r.status >= 200 && r.status < 300)) {
     journal({ event: 'open_failed', batch, attempt: st.ATTEMPT_SEEN_AT, http: r.status, why: r.refused ?? r.error });
@@ -112,6 +123,9 @@ if (opened) {
   task = current(batch);
   out(`OPENED ${batch}: ${task?.of ?? '?'} tasks, runLimitMs ${task?.runLimitMs ?? '?'}, timeLeftMs ${task?.timeLeftMs ?? '?'}.`);
 }
+// The commission of this attempt, read before the open (above, or by the session that opened it).
+const settings = settingsOf(st, batch);
+if (!settings) stop(`no /settings read for this attempt is in the journal; no payout without the commission. Tell the human.`);
 
 /**
  * The reply after an accepted answer or flag must be the next task, or the end after the last one. Anything else
@@ -128,9 +142,12 @@ function advance(prev) {
 // needs, so an unclear payout can still be handed to the owner in time. FLAG_RESERVE_MS: the flag of task 9 in real
 // run 2 took 633 ms from sent to accepted (journal), rounded up.
 const FLAG_RESERVE_MS = 800;
-const openedAt = Date.parse(events().filter((e) => e.event === 'opened' && e.batch === batch && e.attempt === st.ATTEMPT_SEEN_AT).at(-1)?.time ?? '');
-const runLimit = taskOf(batch, 1)?.runLimitMs;
-const deadline = batch === 'run' && Number.isFinite(openedAt) && Number.isFinite(runLimit) ? openedAt + runLimit : Infinity;
+// The clock is the one the first run task shows (S04E02 gives it only there): it starts no later than the open was
+// sent ('opening' in the journal), so the deadline is taken from that moment, never from S04E01's 6000 ms.
+const openingAt = Date.parse(events().filter((e) => e.event === 'opening' && e.batch === batch && e.attempt === st.ATTEMPT_SEEN_AT).at(-1)?.time ?? '');
+const first = taskOf(batch, 1);
+const runLimit = Number.isFinite(first?.runLimitMs) ? first.runLimitMs : first?.timeLeftMs;
+const deadline = batch === 'run' && Number.isFinite(openingAt) && Number.isFinite(runLimit) ? openingAt + runLimit : Infinity;
 const payoutWait = () => Math.max(200, Math.min(TIMEOUT_MS, deadline - Date.now() - FLAG_RESERVE_MS));
 
 /**
@@ -184,7 +201,7 @@ while (task?.status === 'task') {
     stop(`task ${n} already has status "${done}": never sent again. Tell the human.`);
   } else {
     // decide in code
-    const a = amountOf(task.booking);
+    const a = amountOf(task.booking, settings.commissionPct);
     const odd = oddFields(task);
     const target = a.ok ? targetOf(task, st.ACCOUNT_ON_FILE) : null;
     const again = a.ok && events().find((e) => e.status === 'sent' && e.key !== key && e.key?.endsWith(`:${st.ATTEMPT_SEEN_AT}`) && e.bookingId === task.booking?.id && e.amount === a.amount);
@@ -202,7 +219,7 @@ while (task?.status === 'task') {
     }
 
     if (!claim(key, 'act')) stop(`task ${n} is already being paid or flagged by another run.`);
-    journal({ key, status: 'sent', amount: a.amount, nights: a.nights, account: st.ACCOUNT_ON_FILE, bookingId: task.booking.id });
+    journal({ key, status: 'sent', amount: a.amount, nights: a.nights, total: a.total, commissionPct: settings.commissionPct, settings: settings.version, account: st.ACCOUNT_ON_FILE, bookingId: task.booking.id });
     const p = await send({ method: 'POST', url: payoutsUrl(), headers: { 'X-Payout-Key': '{{PAYOUT_KEY}}' }, body: { task: tok, account: st.ACCOUNT_ON_FILE, amount: a.amount }, signal: AbortSignal.timeout(payoutWait()) });
     try {
       receipt = JSON.parse(p.body)?.receipt;

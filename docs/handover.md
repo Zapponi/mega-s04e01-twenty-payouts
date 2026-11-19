@@ -1,45 +1,23 @@
-# Handover — S04E01 Twenty payouts (2026-11-17 03:50 UTC / 00:50 BRT)
-
-Objective: the payout-runner agent (Pi + vars/http/code, model `openrouter/anthropic/claude-haiku-5.5`) runs the batch of 20 payouts on its own, inside the time limit, and the claim is accepted (uuid c0000000-0000-4000-8000-0000005e04e1).
-
-**Deadline: the ticket expires 2026-11-17 21:44 UTC = 18:44 BRT (today).** Real run nº 2 must happen before that.
-
-## State
-
-- **`main` = 77704a8** (PR #11 merged). Branch `8-run2` holds only the session notes and this file.
-- Tests 82/82. The lab is green twice with the model. `check-flow --release` PASS.
-- **Real run nº 1** (03:06 UTC) was refused: "Time ran out at task 2." The real limit is **6000 ms for the WHOLE batch** (`runLimitMs`), not per task.
-  - check-lane `routine-script` was called and recorded in `logs/check-lane.jsonl`.
-  - That run counts for nothing. A new manual fetch starts a new run.
-- **The fix, merged:** `scripts/routine.mjs` runs the whole batch in one process, with the connection kept open.
-  - A pace guard reads the practice of the same attempt. If 20 tasks would take more than 85% of 6 s, the run is not opened (exit 6).
-  - `ROLE.md`: journal status → manual (only if no attempt is open) → check-key → `routine.mjs practice` → `routine.mjs run` (once) → `parked.mjs` → summary.
-- **Rehearsal attempt:** open until 06:00:29 UTC; its run was refused. `MANUAL_ONCE` blocks a new manual fetch until then. After 06:00:29 UTC, `journal status` says "fetch the manual" and run nº 2 needs no code change.
-- **Decided** (docs/decisions.md): run nº 2 waits until Giovanni wakes ("prefiro fazer amanha, preciso dormir").
-
-## Run nº 2 — exact steps (after Giovanni's yes, with him at the Challenge page)
-
-1. Check that the machine is idle: `free -g`, `uptime`, and no whisper process running.
-2. Run `./verify`: unit 82/82 and M5 PASS.
-3. Run `node host-desk/roles/payout-runner/scripts/journal.mjs status`. Expected: `attempt: none open`, and next: fetch the manual.
-4. From `host-desk/roles/payout-runner`: `MODE=run ALLOW_RUN=1 MODEL=openrouter/anthropic/claude-haiku-5.5 RUN_ID=real-run2-<stamp> node run.mjs`, in the background, with a Monitor on `journal/journal.jsonl`.
-5. Watch for `PACE TOO SLOW`. If it appears, the run was not opened: report it and stop.
-6. Tell Giovanni once for each owner task (n and reason). He decides on https://hq.mega.dev/challenges/twenty-payouts.
-7. If any refusal carries a `need` or `pointer`, call check-lane with it and add a line to `logs/check-lane.jsonl`.
-8. Afterwards, run `./verify` in full (M1–M7) and `check-flow --release`, then `/verify`. Only then ask Giovanni's yes for `claim-challenge`, which cannot be taken back.
-
-## Don't
-
-- Call `start-challenge`.
-- Fetch `/manual` by hand.
-- Run `settle.mjs` on the run's tasks.
-- Write code by heredoc.
-- Run tests in parallel on a loaded machine. The machine must be idle on run day: the limit is 6 s for the whole batch.
-
-## Return route
-
-`t3_thread_send` (environmentId fbf717ef-3cea-41d0-a0a8-8ce0e41ae96c, threadId 7aadc61f-9297-4086-a010-8892c9410baa) with `[fim] S04E01 #8: <result | question | blocked>`.
-
-## Read first
-
-KEEP.md (top lines: the run-wide limit), BRIEF.md, docs/decisions.md, sessions/2026-11-17.md, lab/EXPECTED.md.
+# Handover — S04E02 Looks good to me, slice 2: the batch (2026-11-19 02:25 UTC)
+Objective: one S04E02 payout batch passes (the "done" half still open); the reviewer half is done and accepted. Then the claim (uuid c0000000-0000-4000-8000-0000005e04e2).
+Deadline: ticket expires **2026-11-20 00:03 UTC**; plan: real batch starts by 2026-11-19 20:00 UTC, claim by 23:30 UTC.
+Decisions (docs/decisions.md, 2026-11-18/19): same repo, branch per issue off `s04e02-reviewer`; model = Claude subscription in Pi (`anthropic/claude-haiku-5-5`, token in `~/.pi/agent/anthropic-oauth-token`); no `verify-s04` key check (S04E01 refusal); amount = `Math.floor(total × (1 − commissionPct/100))` with commission from `GET /settings` of the same attempt; I-cases never count for adherence.
+Current state:
+- Slice 1 PASS on the real course: "Review accepted: every verdict is right." (logs/s04e02/review-real-*.json); `./verify --slice 1` PASS; issues #16 #17 #18 closed. Branch `s04e02-reviewer` @ dc25852 (pushed) holds everything.
+- Adherence (`./verify --adherence`): reviewer sentences now pass with model runs; all batch sentences (F14–F19, F21, part of F11–F13, F20, F22) PENDING.
+- Open issues: **#22** (batch in the lab, plan.md § 4, this thread's work), #19 practice key (waits on Giovanni), #20 yes for the real batch + owner tasks (Giovanni), #21 claim (Giovanni, course).
+- `host-desk/vars.json` has TICKET and ATTEMPT (the accepted review's attempt — the batch must NOT use it: plan § 4 "state ATTEMPT wins"); no PAYOUT_KEY yet.
+Done when (BRIEF.md proof): R1 ✔ R2 ✔ R3 ✔ S1 ✔ (reviewer) · B1 ✘ B2 ✘ B3 ✘ B4 ✘ B5 ✘ · S2 ✘ (batch part).
+Open questions for Giovanni: the practice key (secret card, #19) before the practice; the yes for the real batch with its scope (#20); the yes for the claim (#21).
+Approvals (BRIEF.md "Outside actions approved"): GitHub in this repo; lab model runs (39 used for the reviewer; batch lab runs need a new count, ask first); new attempts; practice (POST /practice, practice payouts). NOT approved: POST /run, real payouts, POST /parked, the claim.
+Return route: report in this new thread to Giovanni; nothing to send back.
+Next 3 steps:
+1. AGENTS.md "After the first slice lands": write `docs/features/22-batch-lab.md` (kit `_template.md` at ~/Projects/zapponi/mega-agent-kit/project/docs/features/) and get Giovanni's Acceptance in his words before code.
+2. Branch `22-batch-lab` off `s04e02-reviewer`; plan.md § 4 in order; `lab/CASES.md` B01–B28 are the cases (B23 conflicts with the manual on purpose, see its note).
+3. Dry lab first, then ask for the model session count; then #19 key → practice → ask #20.
+Read first: KEEP.md, BRIEF.md, plan.md § 4–6, lab/CASES.md (batch part + matrix), docs/reviews/2026-11-18-plan.md (Claude items 1, 5, 6; Codex 6, 7, 9), host-desk/roles/payout-runner/ (ROLE.md, scripts/routine.mjs, start.mjs, parked.mjs, lib/), lab/mock-api.mjs, lab/EXPECTED.md.
+Don't:
+- Don't edit files while a lab run is going (it broke R29 in reviewer run 3).
+- Guards that merge state must read the current state at write time (parallel reads lost one: KEEP.md).
+- Never `cat` vars.json; never call start-challenge; never send the payout key to verify-s04.
+- The S04E01 run limit was 6000 ms for the WHOLE batch; read `runLimitMs` from the first task.
