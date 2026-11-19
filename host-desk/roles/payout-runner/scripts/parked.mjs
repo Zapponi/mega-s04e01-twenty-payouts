@@ -162,6 +162,54 @@ if (process.argv[2] === 'answer') {
   process.exit(statusOf(key) === 'answered' ? 0 : 3);
 }
 
+// parked repay <n> — the human's own yes (REPAY_OK=1) to pay ONE task again whose only payout came back as a redirect
+// (3xx "moved", journaled 'moved': the API said it handles the payout elsewhere and gave no receipt). The redirect is
+// never followed: the one send goes to the official payout URL, to the account the owner's decision names, then the
+// task is finished through /parked. Never for 'uncertain' (a timeout or an error may have landed), never twice
+// (claimed), never without the owner's decision in the journal (real batch 2026-11-19, task 12, Giovanni: "eu aceitei
+// pagar a 12").
+if (process.argv[2] === 'repay') {
+  const n = Number(process.argv[3]);
+  const key = keyOf(n);
+  const mine = events().filter((e) => e.key === key);
+  const pays = mine.filter((e) => ['sent', 'moved', 'uncertain', 'paid'].includes(e.status));
+  const dec = mine.findLast((e) => e.event === 'decision');
+  const task = taskOf('run', n);
+  const no = (why) => {
+    console.log(`NOT REPAID, task ${process.argv[3]}: ${why}. Nothing was sent.`);
+    process.exit(1);
+  };
+  if (process.env.REPAY_OK !== '1') no('REPAY_OK is not 1 (the human\'s yes for this one task)');
+  if (!Number.isInteger(n) || !task || !st[taskVar('run', n)]) no('its task or token was not kept at the flag');
+  if (!pays.some((e) => e.status === 'moved') || pays.some((e) => ['uncertain', 'paid'].includes(e.status))) no(`its payout history is not one redirect (${pays.map((e) => e.status).join(', ') || 'none'})`);
+  if (pays.filter((e) => e.status === 'sent').length !== 1) no('it was sent more than once already');
+  if (!dec || !['on-file', 'new'].includes(dec.decision)) no(`no owner decision to pay in the journal (${dec?.decision ?? 'none'})`);
+  if (['answered', 'declined'].includes(statusOf(key))) no(`it is already ${statusOf(key)}`);
+  const account = dec.decision === 'on-file' ? st.ACCOUNT_ON_FILE : task.payout?.account;
+  if (typeof account !== 'string' || !ACCOUNT.test(account)) no(`no structured account to pay (${JSON.stringify(account)})`);
+  const set = await currentSettings();
+  if (!set.ok) no(set.why);
+  const a = dec.amount > 0 ? { ok: true, amount: dec.amount, owner: true } : amountOf(task.booking, set.commissionPct);
+  if (!a.ok) no(a.why);
+  if (!claim(key, 'owner-repay')) no('a repay of this task was already started');
+  process.env.WRITE_URLS = [parkedUrl(), payoutsUrl()].join(',');
+  journal({ key, status: 'sent', repay: true, amount: a.amount, nights: a.nights, total: a.total, ...(a.owner ? { ownerAmount: true } : { commissionPct: set.commissionPct, settings: set.version }), account, decision: dec.decision, bookingId: task.booking?.id });
+  const p = await send({ method: 'POST', url: payoutsUrl(), headers: { 'X-Payout-Key': '{{PAYOUT_KEY}}' }, body: { task: `{{${taskVar('run', n)}}}`, account, amount: a.amount }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+  let receipt;
+  try {
+    receipt = JSON.parse(p.body)?.receipt;
+  } catch {}
+  if (refused(p, n, 'payout')) process.exit(5);
+  if (!(p.status >= 200 && p.status < 300) || typeof receipt !== 'string' || !receipt) {
+    journal({ key, status: 'uncertain', step: 'repay', http: p.status, why: p.refused ?? p.error, body: p.body?.slice(0, 500) });
+    console.log(`UNCERTAIN repay of task ${n}: ${show(p)}. Never sent again; tell the human.`);
+    process.exit(3);
+  }
+  journal({ key, status: 'paid', amount: a.amount, account, receipt });
+  await finish(n, { answer: a.amount, payout: receipt }, 'answered', { amount: a.amount, account, receipt });
+  process.exit(statusOf(key) === 'answered' ? 0 : 3);
+}
+
 const others = new Set();
 while (pending().length) {
   const r = await send({ method: 'GET', url: parkedUrl(), headers: { Authorization: 'Bearer {{ATTEMPT}}' }, signal: AbortSignal.timeout(TIMEOUT_MS) });

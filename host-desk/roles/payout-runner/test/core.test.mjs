@@ -814,12 +814,13 @@ test('S04E02: the reviewer\'s ATTEMPT in vars.json is never used by the batch (B
 test('S04E02: the reviewer\'s ATTEMPT never reaches a host outside the course API', async () => {
   const { loadVars } = await import(pathToFileURL(join(role, 'extensions/vars.mjs')).href);
   const { scopeOf, config } = await import(netUrl);
-  const prev = process.env.VARS_FILE;
+  const prev = { VARS_FILE: process.env.VARS_FILE, STATE_FILE: process.env.STATE_FILE };
   process.env.VARS_FILE = join(dir, 'v.json');
+  process.env.STATE_FILE = join(dir, 'no-state.json'); // never the real state file (it may hold a live attempt)
   writeFileSync(process.env.VARS_FILE, JSON.stringify({ ATTEMPT: 'att_REVIEWER_1234' }));
   const v = loadVars();
-  process.env.VARS_FILE = prev;
-  assert.equal(v.ATTEMPT, undefined);
+  for (const [k, x] of Object.entries(prev)) if (x === undefined) delete process.env[k]; else process.env[k] = x;
+  assert.ok(!('ATTEMPT' in v), 'the shared ATTEMPT is not {{ATTEMPT}}');
   assert.equal(v.ATTEMPT_PREV_0, 'att_REVIEWER_1234');
   assert.deepEqual(scopeOf('ATTEMPT_PREV_0', config({})), [{ base: 'https://hq.mega.dev/challenges/looks-good-to-me' }]);
 });
@@ -936,4 +937,48 @@ test('a refusal that names its need only in a pointer is journaled with that nee
   assert.equal(r.code, 5, r.out);
   assert.match(r.out, /need: payout-account/);
   assert.ok(journal().some((e) => e.status === 'refused' && e.need === 'payout-account'));
+});
+
+test('parked repay: one owner-approved repay of a 307 task, to the official payout URL, then finished; never twice; never for unclear', async () => {
+  fake.reset({ runTasks: 3, payoutStatus: { 2: { code: 307, body: { status: 'moved', message: 'This payout is handled at the new address.', url: 'https://cdn-s04.mega.dev/abc/payouts' } } } });
+  assert.match((await fetchManual()).out, /^200 /);
+  assert.equal((await run('routine.mjs', 'run')).code, 0);
+  fake.payoutStatus = {};
+  fake.parked.set(2, 'on-file');
+  assert.match((await run('parked.mjs')).out, /STOPPED task 2: a payout was already tried/);
+  const no = await run('parked.mjs', 'repay', '2');
+  assert.match(no.out, /REPAY_OK is not 1/);
+  env.REPAY_OK = '1';
+  try {
+    const r = await run('parked.mjs', 'repay', '2');
+    assert.equal(r.code, 0, r.out);
+    const paid = pays().filter((h) => h.body.task === token('run', 2));
+    assert.equal(paid.length, 2, 'the redirected try plus one repay');
+    assert.equal(paid[1].path, '/payouts');
+    assert.deepEqual(paid[1].body, { task: token('run', 2), account: ON_FILE, amount: Math.floor((8 * 202 + 30) * 0.8) });
+    assert.equal(parkedPosts().length, 1);
+    const again = await run('parked.mjs', 'repay', '2');
+    assert.notEqual(again.code, 0);
+    assert.equal(pays().filter((h) => h.body.task === token('run', 2)).length, 2, 'never a third send');
+  } finally {
+    delete env.REPAY_OK;
+  }
+});
+
+test('parked repay refuses an unclear payout (timeout), even with REPAY_OK', async () => {
+  fake.reset({ runTasks: 3, payoutDelayFor: { 2: 6000 } });
+  env.SETTLE_TIMEOUT_MS = '500';
+  assert.match((await fetchManual()).out, /^200 /);
+  await run('routine.mjs', 'run');
+  fake.payoutDelayFor = {};
+  fake.parked.set(2, 'on-file');
+  await run('parked.mjs');
+  env.REPAY_OK = '1';
+  try {
+    const r = await run('parked.mjs', 'repay', '2');
+    assert.match(r.out, /NOT REPAID, task 2: its payout history is not one redirect/);
+  } finally {
+    delete env.REPAY_OK;
+    env.SETTLE_TIMEOUT_MS = '4000';
+  }
 });
