@@ -69,6 +69,8 @@ if (process.env.READ_ONLY === '1') {
   console.error('Run with READ_ONLY=1 (slice 1), MODE=practice, or MODE=run with ALLOW_RUN=1 (the real batch).');
   process.exit(2);
 }
+// the code tool runs scripts with this Node, never with process.execPath inside Pi (extensions/code.mjs nodeBin)
+process.env.HOST_NODE = process.execPath;
 process.env.RUN_ID ||= new Date().toISOString().replace(/[:.]/g, '-');
 const args = [
   '-p',

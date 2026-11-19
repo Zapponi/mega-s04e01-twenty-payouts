@@ -12,6 +12,8 @@ Not checked yet. The keep skill's scripts/keep-check.mjs fills this part. Never 
 <!-- keep:can-run:end -->
 
 ## Findings
+- A ferramenta `code` dos dois papéis rodava `spawn(process.execPath, …)`; no Pi 1.5.2 do nix (um binário compilado) isso é o próprio `pi`, então cada chamada abriu uma sessão de agente escondida (modelo padrão `claude-opus-5-5`, ferramentas bash/read) no lugar do script: 40 sessões no revisor (01:52–02:20Z, incluindo a revisão real aceita) e 15 no lab do lote (02:53–03:17Z) · source: ~/.pi/agent/sessions/--…-reviewer-scripts--/ e --…-payout-runner-scripts--/ + lab/out/2026-11-19T03-15-07-878Z-model/logs/code.jsonl · how: ran
+- Essas sessões escondidas não gravaram nenhum segredo real (ticket, tentativa, token do modelo): 806 arquivos buscados, 0 ocorrências; uma delas leu os nomes e tamanhos do vars.json, não os valores; nenhuma chamou host de fora nem mudou o repo · source: busca em ~/.pi/agent/sessions, lab/out, /tmp/ut.txt, /tmp/nt.out (2026-11-19 03:25Z) + git status · how: ran
 - Revisão real do revisor melhorado ACEITA (tentativa de 02:19Z, settings 2026-11-17.583, 14 %): h-f48 pass (renomear), h-be9 pass (comissão 15 → 14 = /settings), h-3f1 flag (+ 1); resposta 200 `{"status":"accepted","message":"Review accepted: every verdict is right.","next":"Run today’s payout batch if it has not passed yet, then claim the Challenge."}` · source: logs/s04e02/review-real-2026-11-19T02-20-32-849Z.json · how: ran
 - Uma mudança de comissão PARA o valor do /settings é `pass` para o curso (confirma o caso R03, antes inferência) · source: mesma resposta · how: ran
 - Uma resposta de aceite do /review tem `status: "accepted"` · source: mesma resposta · how: ran
