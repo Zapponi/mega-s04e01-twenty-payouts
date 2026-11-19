@@ -77,7 +77,7 @@ export async function guardedRequest(p, signal) {
 
   let reservation = null;
   if (r.path === '/review') {
-    if (seen.settings?.status !== 200 || seen.patch?.status !== 200) return fail('read GET /settings and GET /patch of this attempt (both 200) before POST /review');
+    if (seen.settings?.status !== 200 || seen.patch?.status !== 200) return fail(`read GET /settings and GET /patch of this attempt (both 200) before POST /review; this session has settings ${seen.settings?.status ?? 'not read'}, patch ${seen.patch?.status ?? 'not read'}`);
     let parsed;
     try {
       parsed = JSON.parse(body ?? '');
@@ -112,12 +112,18 @@ export async function guardedRequest(p, signal) {
   }
   if (reservation) writeFileSync(reservation, JSON.stringify({ status: res.status, at: new Date().toISOString(), reply: mask(text, vars).slice(0, 2000) }));
 
-  if (method === 'GET' && res.status === 200 && (r.path === '/settings' || r.path === '/patch')) {
-    try {
-      session.reads.set(key, { ...seen, [r.path.slice(1)]: { status: 200, body: JSON.parse(text) } });
-    } catch {}
-  } else if (method === 'GET') {
-    session.reads.set(key, { ...seen, [r.path.slice(1)]: { status: res.status } });
+  // Merge into the state as it is now, not as it was when this request started: the model often reads /settings
+  // and /patch at the same time, and a stale copy would erase the other read (lab run 1, 2026-11-19).
+  if (method === 'GET') {
+    let read = { status: res.status };
+    if (res.status === 200) {
+      try {
+        read = { status: 200, body: JSON.parse(text) };
+      } catch {
+        read = { status: 'not JSON' };
+      }
+    }
+    session.reads.set(key, { ...(session.reads.get(key) ?? {}), [r.path.slice(1)]: read });
   }
   let out = mask(text, vars);
   if (out.length > MAX_BODY) out = `${out.slice(0, MAX_BODY)}\n…(cut)`;

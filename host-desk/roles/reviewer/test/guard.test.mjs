@@ -174,3 +174,11 @@ test('without LAB_URL the role reads only the real files and the course URL', as
     Object.assign(process.env, saved);
   }
 });
+
+test('settings and patch read at the same time both count (lab run 1 bug)', async () => {
+  await useMock(sc('traps-a'));
+  await Promise.all([get('/settings'), get('/patch')]);
+  const r = await post(right(sc('traps-a').fixture));
+  assert.match(text(r), /^200 /);
+  assert.equal(reviews().length, 1);
+});
