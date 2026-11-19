@@ -35,7 +35,9 @@ export function adherence(root, results) {
     const counted = s.cases.filter((c) => source.get(c) !== 'I');
     const marks = counted.map((c) => {
       const r = results.get(c);
-      return { c, st: !r ? 'PENDING' : r.ok ? 'PASS' : 'FAIL', from: r?.from };
+      // A dry-lab result proves the checks, not the reviewer (the dry agent reads the answers): it stays PENDING.
+      const st = !r ? 'PENDING' : !r.ok ? 'FAIL' : r.from === 'dry lab only' ? 'PENDING' : 'PASS';
+      return { c, st, from: r?.from };
     });
     const status = !counted.length ? 'FAIL' : marks.some((m) => m.st === 'FAIL') ? 'FAIL' : marks.some((m) => m.st === 'PENDING') ? 'PENDING' : 'PASS';
     const detail = counted.length ? marks.map((m) => `${m.c} ${m.st}${m.from ? ` (${m.from})` : ''}`).join(', ') : 'no O/E case measures this sentence';

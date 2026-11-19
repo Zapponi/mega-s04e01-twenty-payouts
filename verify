@@ -222,6 +222,7 @@ async function adherenceReport() {
     const { cases } = await reviewerCases(dir);
     for (const [id, r] of cases) results.set(id, { ...r, from: model ? 'model lab' : 'dry lab only' });
   }
+  if (results.has('R00c')) results.set('R00c', { ...results.get('R00c'), from: 'static check of run.mjs' });
   const g = givenFirst(ROOT);
   results.set('R00b', { ...g, from: 'real logs + git' });
   const imp = improved(ROOT);
