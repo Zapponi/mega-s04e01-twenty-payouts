@@ -982,3 +982,40 @@ test('parked repay refuses an unclear payout (timeout), even with REPAY_OK', asy
     env.SETTLE_TIMEOUT_MS = '4000';
   }
 });
+
+test('parked repay: an owner amount 0 in the journal (decline lost after a crash) is never repaid (Sol whole-diff A #1)', async () => {
+  fake.reset({ runTasks: 3, payoutStatus: { 2: { code: 307, body: { status: 'moved', message: 'moved', url: 'https://cdn-s04.mega.dev/abc/payouts' } } } });
+  assert.match((await fetchManual()).out, /^200 /);
+  assert.equal((await run('routine.mjs', 'run')).code, 0);
+  fake.payoutStatus = {};
+  const st = JSON.parse(readFileSync(env.STATE_FILE, 'utf8'));
+  const f = join(env.JOURNAL_DIR, 'journal.jsonl');
+  writeFileSync(f, `${readFileSync(f, 'utf8')}${JSON.stringify({ time: new Date().toISOString(), key: `run:2:${st.ATTEMPT_SEEN_AT}`, event: 'decision', n: 2, decision: 'on-file', amount: 0 })}\n`);
+  fake.parked.set(2, { decision: 'on-file', amount: 0 });
+  env.REPAY_OK = '1';
+  try {
+    const r = await run('parked.mjs', 'repay', '2');
+    assert.match(r.out, /NOT REPAID, task 2: the owner's decision carries amount 0/);
+    assert.equal(pays().filter((h) => h.body.task === token('run', 2)).length, 1, 'only the redirected try');
+  } finally {
+    delete env.REPAY_OK;
+  }
+});
+
+test('parked repay: /parked must still show the journaled decision; a later decline wins (Sol whole-diff A #1)', async () => {
+  fake.reset({ runTasks: 3, payoutStatus: { 2: { code: 307, body: { status: 'moved', message: 'moved', url: 'https://cdn-s04.mega.dev/abc/payouts' } } } });
+  assert.match((await fetchManual()).out, /^200 /);
+  assert.equal((await run('routine.mjs', 'run')).code, 0);
+  fake.payoutStatus = {};
+  fake.parked.set(2, 'on-file');
+  await run('parked.mjs');
+  fake.parked.set(2, 'decline');
+  env.REPAY_OK = '1';
+  try {
+    const r = await run('parked.mjs', 'repay', '2');
+    assert.match(r.out, /NOT REPAID, task 2: \/parked now shows/);
+    assert.equal(pays().filter((h) => h.body.task === token('run', 2)).length, 1);
+  } finally {
+    delete env.REPAY_OK;
+  }
+});

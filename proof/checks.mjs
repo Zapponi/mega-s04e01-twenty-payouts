@@ -148,7 +148,7 @@ export function checks({ records, journal = [], manualText = '', checkLane = [],
   const { tasks, writes, decisions, recs } = m;
   const of = [...tasks.values()][0]?.of;
   // a 2xx that says it is not finished (pending, queued, already sent) is not a completion (Sol review #22 B3)
-  const notDone = (w) => /^(pending|queued|waiting|processing|accepted-pending)$/i.test(String(w.res?.status ?? '')) || w.res?.already === true || /\b(queued|pending|processing|not (yet )?(done|finished|answered))\b/i.test(String(w.res?.message ?? ''));
+  const notDone = (w) => /^(pending|queued|waiting|processing|accepted-pending|failed|failure|error|refused|rejected|denied|invalid)$/i.test(String(w.res?.status ?? '')) || w.res?.already === true || /\b(queued|pending|processing|not (yet )?(done|finished|answered))\b/i.test(String(w.res?.message ?? ''));
   // A completion is a 200/201 the course gave as an answer, never a bare acknowledgement (202 {}; Sol review #22 r2): a
   // /run answer counts only when its reply is the next task, or, after the last task, a final status or a message (the
   // S04E01 end reply said "All 20 tasks are answered."; its status field was not kept, Sol review #22 r3).
@@ -255,6 +255,7 @@ export function checks({ records, journal = [], manualText = '', checkLane = [],
     const p = pays.find((x) => x.n === a.n && ok2(x));
     const receipt = json(p?.resBody)?.receipt;
     if (!p) m6.push(`task ${a.n}: answered with no payout`);
+    else if (typeof receipt !== 'string' || !receipt) m6.push(`task ${a.n}: the payout API gave no receipt`);
     else if (a.req?.payout !== receipt) m6.push(`task ${a.n}: the answer's receipt is not the one the payout API gave`);
     if (a.req?.answer !== p?.req?.amount) m6.push(`task ${a.n}: answered ${a.req?.answer}, paid ${p?.req?.amount}`);
   }

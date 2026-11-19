@@ -149,4 +149,5 @@ Revisões:
 
 ## Later
 
+- Um `GET /manual` de outro processo durante o `routine.mjs` pode trocar a tentativa entre o snapshot e o `GET /settings` ou o `POST /run` (Sol whole-diff A #2). Hoje só um processo roda o lote por vez, acompanhado; para rodar sem ninguém, prender o snapshot da tentativa (o `send` usar o `ATTEMPT` do snapshot, ou uma trava no state).
 - Renomear o repo para um nome do Host Desk (ação de fora; perguntar antes).

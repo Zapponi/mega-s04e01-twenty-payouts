@@ -185,6 +185,17 @@ if (process.argv[2] === 'repay') {
   if (pays.filter((e) => e.status === 'sent').length !== 1) no('it was sent more than once already');
   if (!dec || !['on-file', 'new'].includes(dec.decision)) no(`no owner decision to pay in the journal (${dec?.decision ?? 'none'})`);
   if (['answered', 'declined'].includes(statusOf(key))) no(`it is already ${statusOf(key)}`);
+  // amount 0 is the owner's decline, any other non-positive or odd amount is no yes (Sol review whole-diff A #1)
+  if (dec.amount !== undefined && !(Number.isInteger(dec.amount) && dec.amount > 0)) no(`the owner's decision carries amount ${JSON.stringify(dec.amount)}, not a payout`);
+  // the journal is not enough: /parked must still show the same decision and amount now (a later change wins)
+  const pr = await send({ method: 'GET', url: parkedUrl(), headers: { Authorization: 'Bearer {{ATTEMPT}}' }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+  let live = null;
+  try {
+    live = JSON.parse(pr.body)?.parked;
+  } catch {}
+  if (!(pr.status >= 200 && pr.status < 300) || !Array.isArray(live)) no(`could not read /parked now: ${show(pr).slice(0, 200)}`);
+  const now = live.filter((e) => Number(e?.n) === n);
+  if (now.length !== 1 || now[0].decision !== dec.decision || ownerAmount(now[0]) !== dec.amount) no(`/parked now shows ${JSON.stringify(now.map((e) => ({ decision: e.decision, amount: e.amount })))}, the journal says ${dec.decision}${dec.amount !== undefined ? ` ${dec.amount}` : ''}`);
   const account = dec.decision === 'on-file' ? st.ACCOUNT_ON_FILE : task.payout?.account;
   if (typeof account !== 'string' || !ACCOUNT.test(account)) no(`no structured account to pay (${JSON.stringify(account)})`);
   const set = await currentSettings();

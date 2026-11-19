@@ -219,6 +219,19 @@ async function r3Real() {
   return { ok, detail: `${files.at(-1)}: ${r.status} ${JSON.stringify(r.body).slice(0, 200)}; unexpired ${r.unexpired}; hunks = patch ${r.sameHunks}` };
 }
 
+// The reviewer's must checks in the default run too (BRIEF.md "Proof": ./verify exits 0 only when every must check
+// passes; Sol whole-diff A #4): R1 on the two latest model lab runs, R2 on the latest, R3 on the real course.
+async function reviewerMust() {
+  const runs = existsSync(REVIEWER_OUT) ? readdirSync(REVIEWER_OUT).filter((d) => /^reviewer-.+-model$/.test(d) && existsSync(join(REVIEWER_OUT, d, 'done.json'))).sort().slice(-2) : [];
+  const roll = [];
+  for (const d of runs) roll.push({ d, r: (await reviewerCases(join(REVIEWER_OUT, d))).rollups });
+  const of = (x, id) => x.r.find((y) => y.id === id) ?? { ok: false, detail: `no ${id} in the run` };
+  check('R1', roll.length === 2 && roll.every((x) => of(x, 'R1').ok), roll.length === 2 ? roll.map((x) => `${x.d}: ${of(x, 'R1').detail}`).join('; ') : `${roll.length} model lab run(s) of the reviewer; two in a row needed`);
+  check('R2', roll.length > 0 && of(roll.at(-1), 'R2').ok, roll.length ? `${roll.at(-1).d}: ${of(roll.at(-1), 'R2').detail}` : 'no model lab run of the reviewer');
+  const r3 = await r3Real();
+  check('R3', r3.ok, r3.detail);
+}
+
 async function sliceOne() {
   const { givenFirst } = await import('./proof/reviewer-lab.mjs');
   const g = givenFirst(ROOT);
@@ -280,6 +293,7 @@ if (args.includes('--lab')) {
   await sliceOne();
 } else {
   for (const r of mustChecks()) check(r.id, r.ok, r.detail);
+  await reviewerMust();
   m5();
   if (all) for (const id of ['K1', 'K2']) check(id, false, 'not built yet');
 }

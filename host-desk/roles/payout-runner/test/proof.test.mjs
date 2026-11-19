@@ -252,3 +252,25 @@ test('M4: a payout that came back 3xx (moved, not followed) and its one owner-ap
   c.records.splice(i, 1, { ...structuredClone(c.records[i + 0]), status: 200 });
   assert.equal(result(c, 'M4').ok, false);
 });
+
+test('M1 does not count a final 200 { status: "failed" } as finished (Sol whole-diff A #3)', () => {
+  const c = clone();
+  const i = find(c.records, (r, b) => /\/run$/.test(r.url) && b?.answer !== undefined && /TASK_RUN_4/.test(r.reqBody));
+  c.records[i].resBody = JSON.stringify({ status: 'failed' });
+  const r = result(c, 'M1');
+  assert.equal(r.ok, false, r.detail);
+  assert.match(r.detail, /missing: 4/);
+});
+
+test('M6 fails when the payout API gave no receipt, even if the answer also carries none (Sol whole-diff A #3)', () => {
+  const c = clone();
+  const p = find(c.records, (r) => /\/payouts$/.test(r.url) && /TASK_RUN_4/.test(r.reqBody));
+  c.records[p].resBody = '{}';
+  const a = find(c.records, (r, b) => /\/run$/.test(r.url) && b?.answer !== undefined && /TASK_RUN_4/.test(r.reqBody));
+  const body = JSON.parse(c.records[a].reqBody);
+  delete body.payout;
+  c.records[a].reqBody = JSON.stringify(body);
+  const r = result(c, 'M6');
+  assert.equal(r.ok, false, r.detail);
+  assert.match(r.detail, /task 4: the payout API gave no receipt/);
+});

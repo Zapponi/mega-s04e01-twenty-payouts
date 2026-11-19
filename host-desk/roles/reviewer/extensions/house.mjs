@@ -9,7 +9,8 @@
 
 const added = (diff) => String(diff ?? '').split('\n').filter((l) => l.startsWith('+') && !l.startsWith('+++')).map((l) => l.slice(1));
 const removed = (diff) => String(diff ?? '').split('\n').filter((l) => l.startsWith('-') && !l.startsWith('---')).map((l) => l.slice(1));
-const pct = (lines) => lines.map((l) => /"commissionPct"\s*:\s*(-?\d+(?:\.\d+)?)/.exec(l)?.[1]).filter((v) => v !== undefined).map(Number);
+// the whole JSON number (1.4e1 is 14, Sol whole-diff A #5); a value that is not a plain JSON number is not judged here
+const pct = (lines) => lines.map((l) => /"commissionPct"\s*:\s*(-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*(?:[,}\]]|$)/.exec(l)?.[1]).filter((v) => v !== undefined).map(Number);
 
 export function fixedVerdicts(patch, settings) {
   const out = {};

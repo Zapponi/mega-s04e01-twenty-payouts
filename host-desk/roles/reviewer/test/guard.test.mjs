@@ -182,3 +182,12 @@ test('settings and patch read at the same time both count (lab run 1 bug)', asyn
   assert.match(text(r), /^200 /);
   assert.equal(reviews().length, 1);
 });
+
+test('fixedVerdicts reads the whole JSON number: 1.4e1 is 14, no forced flag against a live 14 (Sol whole-diff A #5)', () => {
+  const hunk = (to) => ({ id: 'h-x', file: 'config/house.json', diff: `-  "commissionPct": 18,\n+  "commissionPct": ${to},` });
+  const s = { version: 'v', commissionPct: 14 };
+  assert.deepEqual(fixedVerdicts({ hunks: [hunk('1.4e1')] }, s), {});
+  assert.deepEqual(fixedVerdicts({ hunks: [hunk('14')] }, s), {});
+  assert.equal(fixedVerdicts({ hunks: [hunk('15')] }, s)['h-x'].verdict, 'flag');
+  assert.equal(fixedVerdicts({ hunks: [hunk('1.5e1')] }, s)['h-x'].verdict, 'flag');
+});
