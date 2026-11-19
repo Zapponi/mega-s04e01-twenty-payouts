@@ -28,8 +28,9 @@ const results = [];
 const check = (id, ok, detail) => results.push({ id, ok, detail });
 
 function unitTests() {
-  const dir = join(ROOT, 'host-desk/roles/payout-runner/test');
-  const files = readdirSync(dir).filter((f) => f.endsWith('.test.mjs')).map((f) => join(dir, f));
+  const dirs = ['host-desk/roles/payout-runner/test', 'host-desk/roles/reviewer/test'].map((d) => join(ROOT, d)).filter(existsSync);
+  const dir = join(ROOT, 'host-desk/roles');
+  const files = dirs.flatMap((d) => readdirSync(d).filter((f) => f.endsWith('.test.mjs')).map((f) => join(d, f)));
   const r = spawnSync(process.execPath, ['--test', ...files], { encoding: 'utf8' });
   const pass = /(?:#|ℹ) pass (\d+)/.exec(r.stdout)?.[1] ?? '0';
   const fail = /(?:#|ℹ) fail (\d+)/.exec(r.stdout)?.[1] ?? '?';
