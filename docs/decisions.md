@@ -56,3 +56,7 @@ A changed decision gets a new line that names the one it replaces. Findings (wha
 - 2026-11-18 who: agent (manual S04E02 + why/payout-rounding.md) — valor do lote = Math.floor(total × (1 − commissionPct/100)), com commissionPct de GET /settings na mesma tentativa.
 - 2026-11-18 who: agent (h-9a8 recusado; /settings 2026-11-17.481 ≠ ROLE.md 2026-11-10.1) — o revisor melhorado lê /settings e as notas why/ a cada rodada; nenhum valor da casa fica fixo no ROLE.md.
 - 2026-11-18 who: agent (BRIEF fatia 1) — o revisor ganha um dublê no lab/ com dois patches (o real da tentativa 1 e um de armadilhas) antes de gastar uma tentativa real.
+- 2026-11-18 who: human — "Aprovo a prova (Recommended)": prova do S04E02 (R1–R3, B1–B5, S1–S2) e as 3 fatias aprovadas.
+- 2026-11-18 who: human — "Aprovo as 4 (Recommended)": GitHub neste repo; rodadas no laboratório com a assinatura; novas tentativas com um /review cada; prática do lote. O lote real e o claim ficam fora.
+- 2026-11-18 who: human — "Nenhum veto (Recommended)": as decisões de agente do kickoff S04E02 ficam.
+- 2026-11-18 who: agent (regra do S04E01 citava "slice 3") — AGENTS.md: uma escrita na API do curso exige a linha datada em BRIEF "Outside actions approved".

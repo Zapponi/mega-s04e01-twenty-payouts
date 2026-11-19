@@ -43,7 +43,7 @@ Se o manual contradisser este brief, eu paro e pergunto.
    - **Fatia 2:** o lote. O `payout-runner` passa a usar as URLs do S04E02 e a comissão de `/settings`; B2–B5 no laboratório, a prática real (sem limite de tempo) e depois o lote real (B1).
    - **Fatia 3:** `./verify` completo, `/rehearse` e o claim.
 
-   Proof approved: pendente.
+   Proof approved: 2026-11-18 ("Aprovo a prova (Recommended)", à pergunta "você aprova a prova do BRIEF (R1–R3 do revisor, B1–B5 do lote, S1–S2) e as 3 fatias")
 
 3. **Judge:** o curso, pelo `POST /review`, pelo `/run` e pelo `claim-challenge`. O `/review` aceita um envio por tentativa ("a second POST on the same attempt reads back with { already: true }") e, numa recusa, diz qual hunk errou e pode trazer `hint` (read in logs/s04e02/api-index.txt). O curso troca o patch e as configurações por tentativa (a versão `2026-11-17.481` com 18 % já difere da `2026-11-10.1` com 15 % do ROLE.md), então um revisor com valores fixos falha. No lote, pelo S04E01, ele recusa o tempo estourado, o segredo enviado a um host novo e a escrita antes da decisão do dono. Só o claim aceito conta.
 
@@ -81,10 +81,10 @@ Se o manual contradisser este brief, eu paro e pergunto.
 |---|---|---|
 | `GET /manual` (abre tentativa nova), `GET /settings`, `GET /patch` | `hq.mega.dev/challenges/looks-good-to-me` | 2026-11-18 ("Sim, manual + revisor como veio"), só a tentativa 1 |
 | Rodar o revisor como veio, uma vez, com o envio do `POST /review` | `hq.mega.dev`, Pi com a assinatura Claude | 2026-11-18 ("Sim, manual + revisor como veio") — feito |
-| Push, branches, PRs, merges, issues e comentários de fechamento | `Zapponi/mega-s04e01-twenty-payouts` | pendente |
-| Rodadas do revisor e do lote com o modelo, no laboratório | Pi com a assinatura Claude | pendente |
-| Novas tentativas (`GET /manual`) e um `POST /review` por tentativa com o revisor melhorado | `hq.mega.dev` | pendente |
-| Prática do lote (`POST /practice`, pagamentos de prática) | `hq.mega.dev`, `pay-s04.mega.dev` (chave de prática) | pendente |
+| Push, branches, PRs, merges, issues e comentários de fechamento | `Zapponi/mega-s04e01-twenty-payouts` | 2026-11-18 ("Aprovo as 4 (Recommended)") (table) |
+| Rodadas do revisor e do lote com o modelo, no laboratório | Pi com a assinatura Claude | 2026-11-18 ("Aprovo as 4 (Recommended)") (table) |
+| Novas tentativas (`GET /manual`) e um `POST /review` por tentativa com o revisor melhorado | `hq.mega.dev` | 2026-11-18 ("Aprovo as 4 (Recommended)") (table) |
+| Prática do lote (`POST /practice`, pagamentos de prática) | `hq.mega.dev`, `pay-s04.mega.dev` (chave de prática) | 2026-11-18 ("Aprovo as 4 (Recommended)") (table) |
 
 Fora desta tabela, e perguntados na hora: o lote real (`POST /run`) e o `claim-challenge`.
 
