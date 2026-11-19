@@ -73,3 +73,4 @@ A changed decision gets a new line that names the one it replaces. Findings (wha
 - 2026-11-19 who: human — "Mais 1 rodada no fim (Recommended)": R29/F7 — na fatia 3, com o código parado, uma rodada nova do revisor com o modelo (13 sessões), perguntada antes.
 - 2026-11-19 who: human — "Sim, até 6 sessões (Recommended)": refazer o lab do lote (#22) com o modelo depois da correção da ferramenta code (1a72998); até 6 sessões do Haiku 5.5; parar se o code.jsonl mostrar texto de agente.
 - 2026-11-19 who: human — "Corrigir e revisar de novo": #22, depois do 2º FAIL do Codex (M1 aceita 202; M7 ignora need só no pointer), corrigir os 2 na prova real e fazer uma 3ª revisão do Codex só nesse diff.
+- 2026-11-19 who: human — "Patch e encerrar (Recommended)": #22 /sol-loop fecha com 4 rodadas (gpt-6.2-sol); a mensagem final com queued/pending/processing não conta como conclusão; ./verify mostra a resposta final crua; sem 5ª revisão.

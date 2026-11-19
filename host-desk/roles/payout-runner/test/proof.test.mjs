@@ -225,3 +225,16 @@ test('M1 counts the last answer when the end reply has only a message, and still
   c.records[i].resBody = '{}';
   assert.equal(result(c, 'M1').ok, false, 'an empty 200 is not an end reply');
 });
+
+test('M1 does not count an end reply whose message says it is queued or pending, and shows the end reply raw (Sol review #22 round 4)', () => {
+  const c = clone();
+  const i = find(c.records, (r, b) => /\/run$/.test(r.url) && b?.answer !== undefined && /TASK_RUN_4/.test(r.reqBody));
+  for (const message of ['Your answer is queued for processing.', 'Still pending.', 'The run is not done yet.']) {
+    c.records[i].resBody = JSON.stringify({ message });
+    assert.equal(result(c, 'M1').ok, false, message);
+  }
+  c.records[i].resBody = JSON.stringify({ message: 'All 4 tasks are answered.' });
+  const ok = result(c, 'M1');
+  assert.equal(ok.ok, true, ok.detail);
+  assert.match(ok.detail, /end reply: 200 \{"message":"All 4 tasks are answered\."\}/);
+});
