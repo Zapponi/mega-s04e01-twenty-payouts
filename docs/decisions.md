@@ -68,3 +68,4 @@ A changed decision gets a new line that names the one it replaces. Findings (wha
 - 2026-11-19 who: human — "sim" (à pergunta das 26 sessões): lab do revisor com o modelo, 2 rodadas × 13 cenários = 26 sessões do Haiku 5.5 na assinatura.
 - 2026-11-19 who: human — "Sim, mais 13 (Recommended)": total de 39 sessões no lab do revisor (rodada 1 achou o bug da trava; 2 rodadas novas depois da correção).
 - 2026-11-19 who: human — "Aceitar e ir para a #18": exceção à regra "duas rodadas seguidas" da #17; rodada 2 limpa (R1 17/17, R2 14/14, S1) e rodada 3 com R1 17/17 e S1, R29 falho só por edição minha (save-review.mjs, http.mjs, verify) durante a rodada.
+- 2026-11-19 who: human — "Aceito o rascunho (Recommended)": aceite da #22 (docs/features/22-batch-lab.md): no lab, B01–B28 numa rodada sem modelo e em duas seguidas com o modelo; comissão do /settings da tentativa com Math.floor; o resto ao dono com o amount dele; chave só no pay-s04; nunca a tentativa do revisor.
