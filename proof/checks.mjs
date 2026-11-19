@@ -152,7 +152,13 @@ export function checks({ records, journal = [], manualText = '', checkLane = [],
   // A completion is a 200/201 the course gave as an answer, never a bare acknowledgement (202 {}; Sol review #22 r2): a
   // /run answer counts only when its reply is the next task, or, after the last task, a final status or a message (the
   // S04E01 end reply said "All 20 tasks are answered."; its status field was not kept, Sol review #22 r3).
-  const finished = (w) => [200, 201].includes(w.status) && !refusal(w) && !notDone(w) && (w.kind !== 'answer' || (w.res?.status === 'task' && w.res.n > w.n) || (w.n === of && w.res?.status !== 'task' && ((typeof w.res?.status === 'string' && w.res.status !== '') || (typeof w.res?.message === 'string' && w.res.message.trim() !== ''))));
+  // Fail closed (Sol whole-diff re-review A #3): the end reply counts only when it reads as a success the proof knows
+  // (status done/ok/accepted/solved/complete…, or no status and a message that says answered/finished/done), and no
+  // reply that speaks of a failure counts anywhere. An unknown shape is a FAIL with the raw reply for a human to read.
+  const failWords = (w) => /\b(fail(ed|s|ure)?|errors?|refused|rejected|denied|invalid|not accepted)\b/i.test(String(w.res?.message ?? ''));
+  const okStatus = (st) => typeof st === 'string' && /^(done|ok|accepted|solved|complete|completed|finished|success)$/i.test(st);
+  const endOk = (w) => (okStatus(w.res?.status) || (w.res?.status === undefined && /\b(answered|finished|done|complete)\b/i.test(String(w.res?.message ?? ''))));
+  const finished = (w) => [200, 201].includes(w.status) && !refusal(w) && !notDone(w) && !failWords(w) && (w.kind !== 'answer' || (w.res?.status === 'task' && w.res.n > w.n) || (w.n === of && endOk(w)));
   const done = (n, kinds) => writes.some((w) => w.n === n && kinds.includes(w.kind) && finished(w));
   const flagged = [...new Set(writes.filter((w) => w.kind === 'flag' && ok2(w)).map((w) => w.n))];
 
@@ -252,7 +258,8 @@ export function checks({ records, journal = [], manualText = '', checkLane = [],
     if (p.req?.account !== target) m6.push(`task ${p.n}: paid to ${p.req?.account}, expected ${target ?? 'no payout'}`);
   }
   for (const a of writes.filter((w) => ['answer', 'parkedAnswer'].includes(w.kind))) {
-    const p = pays.find((x) => x.n === a.n && ok2(x));
+    // the payout that gave the receipt must come before the answer that carries it (Sol whole-diff re-review A #3)
+    const p = pays.find((x) => x.n === a.n && ok2(x) && x.i < a.i);
     const receipt = json(p?.resBody)?.receipt;
     if (!p) m6.push(`task ${a.n}: answered with no payout`);
     else if (typeof receipt !== 'string' || !receipt) m6.push(`task ${a.n}: the payout API gave no receipt`);

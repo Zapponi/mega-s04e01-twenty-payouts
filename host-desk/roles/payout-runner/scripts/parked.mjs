@@ -91,7 +91,34 @@ async function currentSettings() {
 }
 
 /** Acts on one decision that shows in /parked. Returns nothing; every outcome is journaled and printed. */
-async function act(n, decision, entry, seenAt) {
+// A payout history that may be repaid once on the human's own yes: one send that came back as a redirect (3xx
+// "moved": the API said it handles it elsewhere and gave no receipt), never 'uncertain' (a timeout may have landed).
+const repayable = (mine) => {
+  const pays = mine.filter((e) => ['sent', 'moved', 'uncertain', 'paid'].includes(e.status));
+  return pays.some((e) => e.status === 'moved') && !pays.some((e) => ['uncertain', 'paid'].includes(e.status)) && pays.filter((e) => e.status === 'sent').length === 1;
+};
+
+/** One decision for task n from its /parked entries: { decision, entry }, { why } (conflict), or null (not decided yet). */
+function oneDecision(entries) {
+  // null is "not decided yet" (index); a text "null", "pending" or "" is read the same way, never as a decision
+  const undecided = (d) => d === null || d === undefined || (typeof d === 'string' && /^(null|pending|)$/i.test(d.trim()));
+  const decisions = [...new Set(entries.map((e) => e.decision).filter((d) => !undecided(d)))];
+  if (decisions.length === 0) return null;
+  if (decisions.length > 1) return { why: `/parked shows ${decisions.join(' and ')} at once` };
+  const same = entries.filter((e) => e.decision === decisions[0]);
+  const amounts = new Set(same.map((e) => JSON.stringify(e.amount ?? null)));
+  if (amounts.size > 1) return { why: `/parked shows amounts ${[...amounts].join(' and ')} at once` };
+  const accounts = new Set(same.map((e) => JSON.stringify(e.account ?? null)));
+  if (accounts.size > 1) return { why: `/parked shows accounts ${[...accounts].join(' and ')} at once` };
+  return { decision: decisions[0], entry: same[0] };
+}
+
+/**
+ * Acts on one decision that shows in /parked. Every owner payout goes through here, the human's repay too (Sol
+ * whole-diff re-review A #1, #2): one gate, so a check added for one path holds for all. Returns nothing; every
+ * outcome is journaled and printed.
+ */
+async function act(n, decision, entry, seenAt, { repay = false } = {}) {
   const key = keyOf(n);
   const own = ownerAmount(entry);
   const prior = events().filter((e) => e.key === key && e.event === 'decision');
@@ -126,9 +153,9 @@ async function act(n, decision, entry, seenAt) {
   // again, even after an owner's "yes": it may have landed, or its address moved. Decline still finishes it.
   const mine = events().filter((e) => e.key === key);
   const tried = mine.findLast((e) => ['uncertain', 'moved'].includes(e.status)) ?? mine.find((e) => e.status === 'sent');
-  if (tried) return stop(n, `a payout was already tried for this task (${tried.status}${tried.http ? `, http ${tried.http}` : ''}); never sent again. Only "decline" can finish it here`);
-  if (!claim(key, 'owner-pay')) return say(`task ${n} is already being paid by another run: nothing sent.`);
-  journal({ key, status: 'sent', amount: a.amount, nights: a.nights, total: a.total, ...(a.owner ? { ownerAmount: true } : { commissionPct: set.commissionPct, settings: set.version }), account, decision, bookingId: task.booking?.id });
+  if (tried && !(repay && repayable(mine))) return stop(n, `a payout was already tried for this task (${tried.status}${tried.http ? `, http ${tried.http}` : ''}); never sent again. Only "decline" can finish it here`);
+  if (!claim(key, repay ? 'owner-repay' : 'owner-pay')) return say(`task ${n} is already being paid by another run: nothing sent.`);
+  journal({ key, status: 'sent', ...(repay ? { repay: true } : {}), amount: a.amount, nights: a.nights, total: a.total, ...(a.owner ? { ownerAmount: true } : { commissionPct: set.commissionPct, settings: set.version }), account, decision, bookingId: task.booking?.id });
   const p = await send({
     method: 'POST',
     url: payoutsUrl(),
@@ -171,53 +198,28 @@ if (process.argv[2] === 'answer') {
 if (process.argv[2] === 'repay') {
   const n = Number(process.argv[3]);
   const key = keyOf(n);
-  const mine = events().filter((e) => e.key === key);
-  const pays = mine.filter((e) => ['sent', 'moved', 'uncertain', 'paid'].includes(e.status));
-  const dec = mine.findLast((e) => e.event === 'decision');
-  const task = taskOf('run', n);
   const no = (why) => {
     console.log(`NOT REPAID, task ${process.argv[3]}: ${why}. Nothing was sent.`);
     process.exit(1);
   };
   if (process.env.REPAY_OK !== '1') no('REPAY_OK is not 1 (the human\'s yes for this one task)');
-  if (!Number.isInteger(n) || !task || !st[taskVar('run', n)]) no('its task or token was not kept at the flag');
-  if (!pays.some((e) => e.status === 'moved') || pays.some((e) => ['uncertain', 'paid'].includes(e.status))) no(`its payout history is not one redirect (${pays.map((e) => e.status).join(', ') || 'none'})`);
-  if (pays.filter((e) => e.status === 'sent').length !== 1) no('it was sent more than once already');
-  if (!dec || !['on-file', 'new'].includes(dec.decision)) no(`no owner decision to pay in the journal (${dec?.decision ?? 'none'})`);
+  if (!Number.isInteger(n) || !taskOf('run', n) || !st[taskVar('run', n)]) no('its task or token was not kept at the flag');
+  const mine = events().filter((e) => e.key === key);
   if (['answered', 'declined'].includes(statusOf(key))) no(`it is already ${statusOf(key)}`);
-  // amount 0 is the owner's decline, any other non-positive or odd amount is no yes (Sol review whole-diff A #1)
-  if (dec.amount !== undefined && !(Number.isInteger(dec.amount) && dec.amount > 0)) no(`the owner's decision carries amount ${JSON.stringify(dec.amount)}, not a payout`);
-  // the journal is not enough: /parked must still show the same decision and amount now (a later change wins)
-  const pr = await send({ method: 'GET', url: parkedUrl(), headers: { Authorization: 'Bearer {{ATTEMPT}}' }, signal: AbortSignal.timeout(TIMEOUT_MS) });
-  let live = null;
+  if (!repayable(mine)) no(`its payout history is not one redirect (${mine.filter((e) => e.status).map((e) => e.status).join(', ') || 'none'})`);
+  // the decision comes from /parked now, never from the journal alone (a later change wins), and then takes the
+  // same path as every owner payout: same account, amount, duplicate and settings checks
+  const r = await send({ method: 'GET', url: parkedUrl(), headers: { Authorization: 'Bearer {{ATTEMPT}}' }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+  let list = null;
   try {
-    live = JSON.parse(pr.body)?.parked;
+    list = JSON.parse(r.body)?.parked;
   } catch {}
-  if (!(pr.status >= 200 && pr.status < 300) || !Array.isArray(live)) no(`could not read /parked now: ${show(pr).slice(0, 200)}`);
-  const now = live.filter((e) => Number(e?.n) === n);
-  if (now.length !== 1 || now[0].decision !== dec.decision || ownerAmount(now[0]) !== dec.amount) no(`/parked now shows ${JSON.stringify(now.map((e) => ({ decision: e.decision, amount: e.amount })))}, the journal says ${dec.decision}${dec.amount !== undefined ? ` ${dec.amount}` : ''}`);
-  const account = dec.decision === 'on-file' ? st.ACCOUNT_ON_FILE : task.payout?.account;
-  if (typeof account !== 'string' || !ACCOUNT.test(account)) no(`no structured account to pay (${JSON.stringify(account)})`);
-  const set = await currentSettings();
-  if (!set.ok) no(set.why);
-  const a = dec.amount > 0 ? { ok: true, amount: dec.amount, owner: true } : amountOf(task.booking, set.commissionPct);
-  if (!a.ok) no(a.why);
-  if (!claim(key, 'owner-repay')) no('a repay of this task was already started');
-  process.env.WRITE_URLS = [parkedUrl(), payoutsUrl()].join(',');
-  journal({ key, status: 'sent', repay: true, amount: a.amount, nights: a.nights, total: a.total, ...(a.owner ? { ownerAmount: true } : { commissionPct: set.commissionPct, settings: set.version }), account, decision: dec.decision, bookingId: task.booking?.id });
-  const p = await send({ method: 'POST', url: payoutsUrl(), headers: { 'X-Payout-Key': '{{PAYOUT_KEY}}' }, body: { task: `{{${taskVar('run', n)}}}`, account, amount: a.amount }, signal: AbortSignal.timeout(TIMEOUT_MS) });
-  let receipt;
-  try {
-    receipt = JSON.parse(p.body)?.receipt;
-  } catch {}
-  if (refused(p, n, 'payout')) process.exit(5);
-  if (!(p.status >= 200 && p.status < 300) || typeof receipt !== 'string' || !receipt) {
-    journal({ key, status: 'uncertain', step: 'repay', http: p.status, why: p.refused ?? p.error, body: p.body?.slice(0, 500) });
-    console.log(`UNCERTAIN repay of task ${n}: ${show(p)}. Never sent again; tell the human.`);
-    process.exit(3);
-  }
-  journal({ key, status: 'paid', amount: a.amount, account, receipt });
-  await finish(n, { answer: a.amount, payout: receipt }, 'answered', { amount: a.amount, account, receipt });
+  if (!(r.status >= 200 && r.status < 300) || !Array.isArray(list)) no(`could not read /parked now: ${show(r).slice(0, 200)}`);
+  const one = oneDecision(list.filter((e) => Number(e?.n) === n));
+  if (!one) no('/parked shows no decision for it now');
+  if (one.why) no(one.why);
+  if (!['on-file', 'new'].includes(one.decision) || !(ownerAmount(one.entry) === undefined || ownerAmount(one.entry) > 0)) no(`/parked says ${one.decision}${one.entry.amount !== undefined ? ` with amount ${JSON.stringify(one.entry.amount)}` : ''}, not a payout`);
+  await act(n, one.decision, one.entry, new Date().toISOString(), { repay: true });
   process.exit(statusOf(key) === 'answered' ? 0 : 3);
 }
 
@@ -253,20 +255,13 @@ while (pending().length) {
       byN.get(n).push(e);
     }
     for (const [n, entries] of byN) {
-      // null is "not decided yet" (index); a text "null", "pending" or "" is read the same way, never as a decision
-      const undecided = (d) => d === null || d === undefined || (typeof d === 'string' && /^(null|pending|)$/i.test(d.trim()));
-      const decisions = [...new Set(entries.map((e) => e.decision).filter((d) => !undecided(d)))];
-      if (decisions.length === 0) continue; // null: not decided yet
-      if (decisions.length > 1) {
-        stop(n, `/parked shows ${decisions.join(' and ')} at once`);
+      const one = oneDecision(entries);
+      if (!one) continue; // null: not decided yet
+      if (one.why) {
+        stop(n, one.why);
         continue;
       }
-      const amounts = new Set(entries.filter((e) => e.decision === decisions[0]).map((e) => JSON.stringify(e.amount ?? null)));
-      if (amounts.size > 1) {
-        stop(n, `/parked shows amounts ${[...amounts].join(' and ')} at once`);
-        continue;
-      }
-      await act(n, decisions[0], entries.find((e) => e.decision === decisions[0]), seenAt);
+      await act(n, one.decision, one.entry, seenAt);
     }
   }
   const still = pending();

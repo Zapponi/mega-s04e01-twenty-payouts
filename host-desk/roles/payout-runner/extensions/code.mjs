@@ -15,7 +15,8 @@ function logCall(record) {
   try {
     const dir = config().logDir;
     mkdirSync(dir, { recursive: true });
-    appendFileSync(join(dir, 'code.jsonl'), `${JSON.stringify({ time: new Date().toISOString(), run: process.env.RUN_ID ?? '', ...record })}\n`);
+    // the whole line is masked, every field (Sol whole-diff re-review B #3)
+    appendFileSync(join(dir, 'code.jsonl'), `${mask(JSON.stringify({ time: new Date().toISOString(), run: process.env.RUN_ID ?? '', ...record }))}\n`);
   } catch {}
 }
 
@@ -96,7 +97,7 @@ export default function (pi) {
       const t0 = Date.now();
       if (!file) {
         logCall({ file: String(p.file).slice(0, 100), args: (p.args ?? []).map((a) => mask(String(a)).slice(0, 200)), refused: 'no such file' });
-        return { content: [{ type: 'text', text: `No such file in scripts/: ${p.file}` }], details: { failed: true } };
+        return { content: [{ type: 'text', text: mask(`No such file in scripts/: ${p.file}`) }], details: { failed: true } };
       }
       const node = nodeBin();
       if (!node) {

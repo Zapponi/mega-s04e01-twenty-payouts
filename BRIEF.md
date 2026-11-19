@@ -149,5 +149,7 @@ Revisões:
 
 ## Later
 
+- A máscara do revisor (`reviewer/extensions/http.mjs`) não pega um segredo em percent-encoding caractere por caractere, como a do payout-runner pega (`encodedSpan`); levar o mesmo `mask` para os dois papéis (Sol whole-diff re-review B #2).
+- `./verify --slice 1` roda só R00b, R3 e M5, não R1 e R2; o `./verify` padrão roda os três. Decidir se a fatia 1 deve rodar R1 e R2 também (Sol whole-diff re-review A #4).
 - Um `GET /manual` de outro processo durante o `routine.mjs` pode trocar a tentativa entre o snapshot e o `GET /settings` ou o `POST /run` (Sol whole-diff A #2). Hoje só um processo roda o lote por vez, acompanhado; para rodar sem ninguém, prender o snapshot da tentativa (o `send` usar o `ATTEMPT` do snapshot, ou uma trava no state).
 - Renomear o repo para um nome do Host Desk (ação de fora; perguntar antes).

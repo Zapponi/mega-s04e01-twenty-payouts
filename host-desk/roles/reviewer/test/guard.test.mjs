@@ -192,3 +192,25 @@ test('fixedVerdicts reads the whole JSON number: 1.4e1 is 14, no forced flag aga
   assert.equal(fixedVerdicts({ hunks: [hunk('15')] }, s)['h-x'].verdict, 'flag');
   assert.equal(fixedVerdicts({ hunks: [hunk('1.5e1')] }, s)['h-x'].verdict, 'flag');
 });
+
+test('fixedVerdicts fails closed: a nested or new commissionPct is not forced, only a plain replacement (Sol re-review A #5)', () => {
+  const s = { version: 'v', commissionPct: 14 };
+  const nested = { id: 'h-n', file: 'config/house.json', diff: '   "commissionPct": 14,\n+  "audit": {\n+    "commissionPct": 15\n+  },' };
+  assert.deepEqual(fixedVerdicts({ hunks: [nested] }, s), {});
+  const moved = { id: 'h-m', file: 'config/house.json', diff: '-  "commissionPct": 14,\n+    "commissionPct": 15,' };
+  assert.deepEqual(fixedVerdicts({ hunks: [moved] }, s), {});
+  const plain = { id: 'h-p', file: 'config/house.json', diff: '-  "commissionPct": 14,\n+  "commissionPct": 15,' };
+  assert.equal(fixedVerdicts({ hunks: [plain] }, s)['h-p'].verdict, 'flag');
+});
+
+test('the reviewer masks every refusal text: a hunk id equal to a secret never comes back raw (Sol re-review B #1)', async () => {
+  await useMock(sc('attempt1'));
+  await get('/settings');
+  await get('/patch');
+  const secret = LAB_VARS.ATTEMPT;
+  // a finding that names the secret as its hunk: the guard refuses it as unknown, and the refusal must not echo it
+  const r = await post([...right(sc('attempt1').fixture), { hunk: secret, verdict: 'pass', reason: 'x' }]);
+  assert.match(text(r), /unknown \{\{ATTEMPT\}\}/);
+  assert.ok(!text(r).includes(secret));
+  assert.equal(reviews().length, 0);
+});

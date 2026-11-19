@@ -10,10 +10,13 @@ const COURSE = 'https://hq.mega.dev/challenges/looks-good-to-me';
 const ZIP_COMMIT = '45cd53b';
 const REVIEWER = 'host-desk/roles/reviewer';
 
-/** Is a course reply to POST /review an acceptance? R3 and R18: a 2xx, not `already`, not a refusal. */
+/**
+ * Is a course reply to POST /review an acceptance? R3 and R18. Fail closed (Sol whole-diff re-review A #4): only a
+ * 200/201 whose status is "accepted" (the real reply, KEEP.md 2026-11-19), not `already`, with no refusal words.
+ */
 export function accepted(status, body) {
-  if (!(status >= 200 && status < 300) || !body || typeof body !== 'object') return false;
-  if (body.already) return false;
+  if (![200, 201].includes(status) || !body || typeof body !== 'object') return false;
+  if (body.already || body.status !== 'accepted') return false;
   return !/refus|reject|wrong|not accepted/i.test(`${body.status ?? ''} ${body.message ?? ''}`);
 }
 

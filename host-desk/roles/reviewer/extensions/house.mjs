@@ -10,7 +10,7 @@
 const added = (diff) => String(diff ?? '').split('\n').filter((l) => l.startsWith('+') && !l.startsWith('+++')).map((l) => l.slice(1));
 const removed = (diff) => String(diff ?? '').split('\n').filter((l) => l.startsWith('-') && !l.startsWith('---')).map((l) => l.slice(1));
 // the whole JSON number (1.4e1 is 14, Sol whole-diff A #5); a value that is not a plain JSON number is not judged here
-const pct = (lines) => lines.map((l) => /"commissionPct"\s*:\s*(-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*(?:[,}\]]|$)/.exec(l)?.[1]).filter((v) => v !== undefined).map(Number);
+const pct = (lines) => lines.map((l) => /^(\s*)"commissionPct"\s*:\s*(-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*(?:[,}\]]|$)/.exec(l)).filter(Boolean).map((m) => ({ indent: m[1], value: Number(m[2]) }));
 
 export function fixedVerdicts(patch, settings) {
   const out = {};
@@ -18,9 +18,12 @@ export function fixedVerdicts(patch, settings) {
   if (!Number.isFinite(live)) return out;
   for (const h of patch?.hunks ?? []) {
     if (!/(^|\/)config\/house\.json$/.test(String(h.file))) continue;
+    // Fail closed (Sol whole-diff re-review A #5): forced only when the hunk plainly replaces one commissionPct line
+    // with another at the same place (same indent); a new, nested or many-valued key is left to the model to judge.
     const to = pct(added(h.diff));
-    if (to.length === 1 && to[0] !== live) {
-      out[h.id] = { verdict: 'flag', why: `sets commissionPct to ${to[0]}; the house's current settings (${settings.version ?? 'GET /settings'}) say ${live}` };
+    const from = pct(removed(h.diff));
+    if (to.length === 1 && from.length === 1 && to[0].indent === from[0].indent && to[0].value !== live) {
+      out[h.id] = { verdict: 'flag', why: `sets commissionPct to ${to[0].value}; the house's current settings (${settings.version ?? 'GET /settings'}) say ${live}` };
     }
   }
   return out;

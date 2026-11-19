@@ -62,7 +62,10 @@ const mask = (text, vars) => Object.entries(vars).reduce((s, [k, v]) => (v && v.
 export async function guardedRequest(p, signal) {
   const vars = loadVars();
   const hosts = loadHosts();
-  const fail = (text) => ({ content: [{ type: 'text', text: `not sent: ${text}` }], details: { failed: true } });
+  // every text that leaves this function, and every file it writes, goes through the mask: no field-by-field list to
+  // forget (Sol whole-diff re-review B #1)
+  const fail = (text) => ({ content: [{ type: 'text', text: mask(`not sent: ${text}`, vars) }], details: { failed: true } });
+  const keep = (file, obj, opts) => writeFileSync(file, mask(JSON.stringify(obj), vars), opts);
   const method = (p.method ?? 'GET').toUpperCase();
   const r = route(method, p.url);
   if (r.error) return fail(r.error);
@@ -94,7 +97,7 @@ export async function guardedRequest(p, signal) {
     reservation = join(stateDir(), `review-${key}.json`);
     try {
       sentHunks = parsed.findings.map((f) => f.hunk);
-      writeFileSync(reservation, JSON.stringify({ reservedAt: new Date().toISOString(), hunks: sentHunks }), { flag: 'wx' });
+      keep(reservation, { reservedAt: new Date().toISOString(), hunks: sentHunks }, { flag: 'wx' });
     } catch {
       return fail('a review for this attempt was already sent; the course takes one POST /review per attempt');
     }
@@ -109,10 +112,10 @@ export async function guardedRequest(p, signal) {
     text = await res.text();
   } catch (e) {
     const why = e?.name === 'TimeoutError' ? `no answer in ${TIMEOUT_MS / 1000} s` : (e?.cause?.message ?? e?.message ?? String(e));
-    if (reservation) writeFileSync(reservation, JSON.stringify({ uncertain: true, why, at: new Date().toISOString(), hunks: sentHunks }));
+    if (reservation) keep(reservation, { uncertain: true, why, at: new Date().toISOString(), hunks: sentHunks });
     return { content: [{ type: 'text', text: `request failed: ${mask(why, vars)}${reservation ? ' — the review may or may not have arrived; it is never sent again for this attempt' : ''}` }], details: { failed: true } };
   }
-  if (reservation) writeFileSync(reservation, JSON.stringify({ status: res.status, at: new Date().toISOString(), hunks: sentHunks, reply: mask(text, vars).slice(0, 2000) }));
+  if (reservation) keep(reservation, { status: res.status, at: new Date().toISOString(), hunks: sentHunks, reply: text.slice(0, 2000) });
 
   // Merge into the state as it is now, not as it was when this request started: the model often reads /settings
   // and /patch at the same time, and a stale copy would erase the other read (lab run 1, 2026-11-19).

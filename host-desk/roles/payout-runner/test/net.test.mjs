@@ -328,3 +328,12 @@ test('a refusal for a host that holds a secret is masked in the reply and the lo
   assert.ok(!r.refused.includes(key[1]), 'the reason holds the secret');
   assert.ok(!logText().includes(key[1]), 'the log holds the secret');
 });
+
+test('code tool: a refused file name that holds a secret is masked in the reply and in code.jsonl (Sol re-review B #3)', async () => {
+  const r = await tools.code.execute('1', { file: `../${FAKE.TICKET}.mjs` });
+  const text = r.content[0].text;
+  assert.match(text, /No such file/);
+  assert.ok(!text.includes(FAKE.TICKET), 'the reply holds the ticket');
+  const log = readFileSync(join(process.env.LOG_DIR, 'code.jsonl'), 'utf8');
+  assert.ok(!log.includes(FAKE.TICKET), 'code.jsonl holds the ticket');
+});

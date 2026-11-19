@@ -274,3 +274,33 @@ test('M6 fails when the payout API gave no receipt, even if the answer also carr
   assert.equal(r.ok, false, r.detail);
   assert.match(r.detail, /task 4: the payout API gave no receipt/);
 });
+
+test('M1 fails closed: a final 200 whose message says the batch failed, or an unknown status, is not finished (Sol re-review A #3)', () => {
+  for (const body of [{ message: 'The batch failed.' }, { status: 'weird' }, { status: 'done', message: 'Run rejected.' }]) {
+    const c = clone();
+    const i = find(c.records, (r, b) => /\/run$/.test(r.url) && b?.answer !== undefined && /TASK_RUN_4/.test(r.reqBody));
+    c.records[i].resBody = JSON.stringify(body);
+    const r = result(c, 'M1');
+    assert.equal(r.ok, false, `${JSON.stringify(body)}: ${r.detail}`);
+  }
+});
+
+test('M6 fails when the answer was sent before the payout that gave its receipt (Sol re-review A #3)', () => {
+  const c = clone();
+  const p = find(c.records, (r) => /\/payouts$/.test(r.url) && /TASK_RUN_4/.test(r.reqBody));
+  const a = find(c.records, (r, b) => /\/run$/.test(r.url) && b?.answer !== undefined && /TASK_RUN_4/.test(r.reqBody));
+  assert.ok(p < a);
+  const [pay] = c.records.splice(p, 1);
+  c.records.splice(a, 0, pay); // the payout now comes right after the answer
+  const r = result(c, 'M6');
+  assert.equal(r.ok, false, r.detail);
+  assert.match(r.detail, /task 4: answered with no payout/);
+});
+
+test('R3 acceptance fails closed: a 202 {} or a 200 without status "accepted" is not an acceptance (Sol re-review A #4)', async () => {
+  const { accepted } = await import('../../../../proof/reviewer-lab.mjs');
+  assert.equal(accepted(202, {}), false);
+  assert.equal(accepted(200, {}), false);
+  assert.equal(accepted(200, { status: 'ok' }), false);
+  assert.equal(accepted(200, { status: 'accepted', message: 'Review accepted: every verdict is right.' }), true);
+});

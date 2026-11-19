@@ -995,7 +995,7 @@ test('parked repay: an owner amount 0 in the journal (decline lost after a crash
   env.REPAY_OK = '1';
   try {
     const r = await run('parked.mjs', 'repay', '2');
-    assert.match(r.out, /NOT REPAID, task 2: the owner's decision carries amount 0/);
+    assert.match(r.out, /NOT REPAID, task 2: \/parked says on-file with amount 0, not a payout/);
     assert.equal(pays().filter((h) => h.body.task === token('run', 2)).length, 1, 'only the redirected try');
   } finally {
     delete env.REPAY_OK;
@@ -1013,8 +1013,62 @@ test('parked repay: /parked must still show the journaled decision; a later decl
   env.REPAY_OK = '1';
   try {
     const r = await run('parked.mjs', 'repay', '2');
-    assert.match(r.out, /NOT REPAID, task 2: \/parked now shows/);
+    assert.match(r.out, /NOT REPAID, task 2: \/parked says decline, not a payout/);
     assert.equal(pays().filter((h) => h.body.task === token('run', 2)).length, 1);
+  } finally {
+    delete env.REPAY_OK;
+  }
+});
+
+const moved307 = { code: 307, body: { status: 'moved', message: 'moved', url: 'https://cdn-s04.mega.dev/abc/payouts' } };
+
+test('parked repay takes the same gate as every owner payout: "new" with another account in /parked stops (Sol re-review A #1)', async () => {
+  fake.reset({ runTasks: 3, payoutStatus: { 2: moved307 } });
+  assert.match((await fetchManual()).out, /^200 /);
+  await run('routine.mjs', 'run');
+  fake.payoutStatus = {};
+  fake.parked.set(2, { decision: 'new', account: 'acct_other9999' });
+  env.REPAY_OK = '1';
+  try {
+    const r = await run('parked.mjs', 'repay', '2');
+    assert.notEqual(r.code, 0);
+    assert.match(r.out, /STOPPED task 2: \/parked names account "acct_other9999"/);
+    assert.equal(pays().filter((h) => h.body.task === token('run', 2)).length, 1, 'only the redirected try');
+  } finally {
+    delete env.REPAY_OK;
+  }
+});
+
+test('parked repay: the same decision delivered twice in /parked is one decision (Sol re-review A #1)', async () => {
+  fake.reset({ runTasks: 3, payoutStatus: { 2: moved307 }, dupEntries: true });
+  assert.match((await fetchManual()).out, /^200 /);
+  await run('routine.mjs', 'run');
+  fake.payoutStatus = {};
+  fake.parked.set(2, 'on-file');
+  env.REPAY_OK = '1';
+  try {
+    const r = await run('parked.mjs', 'repay', '2');
+    assert.equal(r.code, 0, r.out);
+    assert.equal(pays().filter((h) => h.body.task === token('run', 2)).length, 2, 'the redirected try plus one repay');
+  } finally {
+    delete env.REPAY_OK;
+  }
+});
+
+test('parked repay never pays a booking and amount already paid under another task (Sol re-review A #2)', async () => {
+  fake.reset({ runTasks: 3, over: { 2: { booking: { id: 'BK-1001' } } }, payoutStatus: { 2: moved307 } });
+  assert.match((await fetchManual()).out, /^200 /);
+  await run('routine.mjs', 'run');
+  const first = pays().find((h) => h.body.task === token('run', 1));
+  assert.ok(first, 'task 1 paid');
+  fake.payoutStatus = {};
+  fake.parked.set(2, { decision: 'on-file', amount: first.body.amount });
+  env.REPAY_OK = '1';
+  try {
+    const r = await run('parked.mjs', 'repay', '2');
+    assert.notEqual(r.code, 0);
+    assert.match(r.out, /STOPPED task 2: booking BK-1001 for \d+ EUR was already sent/);
+    assert.equal(pays().filter((h) => h.body.task === token('run', 2)).length, 1, 'only the redirected try');
   } finally {
     delete env.REPAY_OK;
   }

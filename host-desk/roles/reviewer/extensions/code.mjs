@@ -77,7 +77,7 @@ export default function (pi) {
     async execute(_id, p, signal) {
       const file = script(p.file);
       if (!file) {
-        return { content: [{ type: 'text', text: `No such file in scripts/: ${p.file}` }], details: { failed: true } };
+        return { content: [{ type: 'text', text: mask(`No such file in scripts/: ${p.file}`, loadVars()) }], details: { failed: true } };
       }
       const node = nodeBin();
       if (!node) {
