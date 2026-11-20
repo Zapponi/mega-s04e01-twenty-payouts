@@ -8,6 +8,7 @@
 //   ./verify --adherence  S04E02: each official sentence F1–F22 of lab/CASES.md, PASS / FAIL / PENDING
 //   ./verify --slice 1    S04E02 slice 1: R3 on the real /review reply, R00b, S1 on the real logs
 //   ./verify --s04e01-slice1  the S04E01 slice 1 checks (read-only manual run)
+//   ./verify --s04e03 [--board <file>]  S04E03: T1–T6 on the board, S1, S3 (proof/s04e03.mjs)
 // It reads the request log, the run log, the saved manual and (later) the API state; never the agent's report on
 // itself. It reads vars.json only to search for leaked values, and never prints a value.
 import { spawnSync } from 'node:child_process';
@@ -15,6 +16,12 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checks } from './proof/checks.mjs';
+
+// S04E03: the team checks on the board (proof/s04e03.mjs), on their own.
+if (process.argv.includes('--s04e03')) {
+  const { run } = await import('./proof/s04e03.mjs');
+  process.exit(await run(process.argv));
+}
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const LOGS = join(ROOT, 'logs');
