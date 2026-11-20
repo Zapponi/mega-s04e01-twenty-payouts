@@ -4,8 +4,7 @@
 // Every string under a key named like task/token in the reply is a secret (it authorizes an answer): it is saved as
 // PRACTICE_TASK_<n> in the state file and masked before anything is logged or printed.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { config, saveState, send } from '../lib/net.mjs';
 import { STATE_FILE } from '../extensions/vars.mjs';
 

@@ -128,7 +128,7 @@ export async function guardedRequest(p, signal) {
         read = { status: 'not JSON' };
       }
     }
-    session.reads.set(key, { ...(session.reads.get(key) ?? {}), [r.path.slice(1)]: read });
+    session.reads.set(key, { ...session.reads.get(key), [r.path.slice(1)]: read });
   }
   let out = mask(text, vars);
   if (out.length > MAX_BODY) out = `${out.slice(0, MAX_BODY)}\n…(cut)`;

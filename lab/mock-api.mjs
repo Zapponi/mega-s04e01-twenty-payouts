@@ -44,11 +44,6 @@ export function scenario() {
   return { run, practice, decisions };
 }
 
-export function expectedTotal(b) {
-  const nights = (Date.parse(`${b.checkOut}T00:00:00Z`) - Date.parse(`${b.checkIn}T00:00:00Z`)) / DAY;
-  return nights * b.nightlyRate + b.cleaningFee;
-}
-
 // The real run's clock: one limit for the whole batch, shown in the first task (S04E01: runLimitMs 6000, KEEP.md); an
 // answer after it is refused and the run is over. The lab uses 9000 (B17: never the remembered 6000) and answers the
 // open 700 ms late, so a deadline taken from the reply instead of the request is too late. Practice: "no time limit:
