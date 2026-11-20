@@ -52,6 +52,7 @@ Fill this per project; the agent follows it instead of guessing. `/kickoff` runs
 
 ## How we work
 - Proof: `./verify` (BRIEF.md "Proof"). Run it after the last change.
+- Hooks on the Linux machine: only the git hooks in `.githooks/` hold (every harness, Pi included). The Claude Code hooks the kit block below names (`kit_gate`, `verify_gate`) are not wired here, and Pi never runs them: follow those steps by hand. S04E03 runs from Pi + Herdr in `~/Projects/zapponi/host-desk` (BRIEF.md "Execução").
 
 <!-- kit:process:start -->
 <!-- This block belongs to the kit: `kickoff.ps1 -Target <project> -Update` replaces it with the kit's current one. Project rules go outside it. -->
