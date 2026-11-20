@@ -203,7 +203,7 @@ test('M1 does not count a bare 202 acknowledgement as finished (Sol review #22 r
 
 test('M7 needs a check-lane line for a need named only in the pointer (Sol review #22 round 2)', () => {
   const c = clone();
-  const i = find(c.records, (r, b) => /\/payouts$/.test(r.url) && /TASK_RUN_4/.test(r.reqBody));
+  const i = find(c.records, (r) => /\/payouts$/.test(r.url) && /TASK_RUN_4/.test(r.reqBody));
   c.records[i].status = 422;
   c.records[i].resBody = JSON.stringify({ status: 'refused', message: 'No.', pointer: 'check-lane has a need for this: payout-run.' });
   c.records.splice(i + 1);

@@ -7,7 +7,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync, existsSync
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { after, before, beforeEach, test } from 'node:test';
+import { after, beforeEach, test } from 'node:test';
 import { amountOf, targetOf } from '../lib/batch.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -87,7 +87,7 @@ const noSecrets = (text, where) => {
   for (const s of [FAKE.TICKET, FAKE.PAYOUT_KEY, TOKEN(1), TOKEN(2), 'att_FAKE_secret_attempt']) assert.ok(!text.includes(s), `${where} holds a secret`);
 };
 
-test('amount follows the manual formula, in whole euros', async () => {
+test('amount follows the manual formula, in whole euros', () => {
   const B = (over = {}) => ({ checkIn: '2027-03-28', checkOut: '2027-04-05', nightlyRate: 215, cleaningFee: 30, currency: 'EUR', ...over });
   assert.deepEqual(amountOf(task(1).booking, 0), { ok: true, nights: 8, total: 1750, amount: 1750 });
   assert.equal(amountOf({ checkIn: '2027-01-31', checkOut: '2027-02-01', nightlyRate: 100, cleaningFee: 0, currency: 'EUR' }, 0).amount, 100);
@@ -116,7 +116,7 @@ test('S04E02 commission: no payout without a usable commission, and none when th
   assert.equal(amountOf(B, 12.5).amount, 437, 'a fractional rate is computed exactly');
 });
 
-test('target: the account on file pays; any other account is the owner\'s call', async () => {
+test('target: the account on file pays; any other account is the owner\'s call', () => {
   assert.equal(targetOf(task(1), ON_FILE), 'on-file');
   assert.equal(targetOf(task(1, { payout: { account: 'acct_other' } }), ON_FILE), 'owner');
   assert.ok(targetOf(task(1, { payout: {} }), ON_FILE).why);
