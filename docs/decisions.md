@@ -84,3 +84,10 @@ A changed decision gets a new line that names the one it replaces. Findings (wha
 - 2026-11-19 who: human — "Merge agora (Recommended)": merge do PR #24 (s04e02-reviewer → main), classe high, depois da limpeza do fim do trabalho.
 - 2026-11-20 who: human — "PR + /sol-loop (Recommended)": faxina de código morto na branch chore/cleanup-dead-code, PR e 1 rodada do /sol-loop antes do merge.
 - 2026-11-20 who: human — "Merge agora (Recommended)": merge do PR #25 (classe normal); o bloqueio do Codex sobre tirar `expectedTotal` do lab/mock-api.mjs fica recusado (nenhuma chamada no repo, no kit nem no histórico; fórmula sem comissão).
+- 2026-11-20 who: human — "Completo do kit" e "Agora": S04E03 começa já, com o processo do kit.
+- 2026-11-20 who: human — "eu nao preciso aprovar as rodadas pagas": rodadas com o modelo sem pedir antes; o número de sessões vai no log.
+- 2026-11-20 who: human — "Me ajude a fazer esse challenge a partir do careca kit" / "seguindo o que seria o fluxo do careca" / "Você no Herdr (Recommended)": Main no Pi + Herdr, em ~/Projects/zapponi/host-desk (git próprio, worktrees ao lado), conduzido pelo Giovanni.
+- 2026-11-20 who: human — "Sim, ensaiar (Recommended)": planner no /lab do careca com board de amostra antes da tentativa.
+- 2026-11-20 who: human — "Aprovo as 4 (Recommended)": um GET /manual; leituras e escritas do time no board; prática do lote; branch, push e PR neste repo. Lote real e claim ficam fora.
+- 2026-11-20 who: human — "Serve, ajustamos no Main (Recommended)": o rascunho do planner vira a base de roles/planner/ROLE.md.
+- 2026-11-20 who: agent (os caminhos do plano são os do git diff a partir do topo do Host Desk; aqui ele é subpasta) — o Host Desk roda numa cópia com git próprio em ~/Projects/zapponi/host-desk; o resultado volta para host-desk/ deste repo num PR.
